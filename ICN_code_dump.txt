@@ -16,18 +16,23 @@ icn-prototype/
         bin/
             pip
             activate
+            flake8
             python3
             activate.csh
+            black
             normalizer
             python
             pip3.12
+            pycodestyle
             pytest
             Activate.ps1
+            blackd
             pip3
             py.test
             activate.fish
             flask
             python3.12
+            pyflakes
         include/
         lib/
     api/
@@ -66,6 +71,34 @@ icn-prototype/
         consensus/
             proof_of_cooperation.py
             __init__.py
+    .git/
+        COMMIT_EDITMSG
+        config
+        HEAD
+        index
+        description
+        objects/
+        refs/
+        branches/
+        hooks/
+            prepare-commit-msg.sample
+            sendemail-validate.sample
+            update.sample
+            pre-rebase.sample
+            pre-receive.sample
+            pre-commit.sample
+            push-to-checkout.sample
+            applypatch-msg.sample
+            commit-msg.sample
+            fsmonitor-watchman.sample
+            post-update.sample
+            pre-push.sample
+            pre-merge-commit.sample
+            pre-applypatch.sample
+        logs/
+            HEAD
+        info/
+            exclude
 
 
 # Code Files Concatenation:
@@ -76,6 +109,7 @@ icn-prototype/
 
 import os
 
+
 def tree_structure(startpath, max_depth=2):
     tree_str = ""
     start_depth = startpath.rstrip(os.path.sep).count(os.path.sep)
@@ -83,29 +117,46 @@ def tree_structure(startpath, max_depth=2):
         depth = root.count(os.path.sep) - start_depth
         if depth > max_depth:
             continue
-        indent = ' ' * 4 * depth
+        indent = " " * 4 * depth
         tree_str += f"{indent}{os.path.basename(root)}/\n"
-        sub_indent = ' ' * 4 * (depth + 1)
+        sub_indent = " " * 4 * (depth + 1)
         for file in files:
             tree_str += f"{sub_indent}{file}\n"
     return tree_str
 
+
 def concatenate_code_files(source_dir, output_file, extensions=None, max_depth=2):
     if extensions is None:
-        extensions = ['.py', '.rs', '.js', '.ts', '.c']  # Only most relevant extensions
+        extensions = [".py", ".rs", ".js", ".ts", ".c"]  # Only most relevant extensions
 
     # Generate the tree structure
     tree_str = tree_structure(source_dir, max_depth=max_depth)
 
-    with open(output_file, 'w', encoding='utf-8') as outfile:
-        outfile.write("# Project Directory Structure (up to depth {}):\n".format(max_depth))
+    with open(output_file, "w", encoding="utf-8") as outfile:
+        outfile.write(
+            "# Project Directory Structure (up to depth {}):\n".format(max_depth)
+        )
         outfile.write(tree_str)
         outfile.write("\n\n# Code Files Concatenation:\n\n")
-        
+
         # Walk through the directory to find and concatenate code files
         for root, dirs, files in os.walk(source_dir):
             # Exclude temp and irrelevant directories, including 'icn_env'
-            dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', 'node_modules', 'build', 'dist', 'venv', '.idea', 'icn_env']]
+            dirs[:] = [
+                d
+                for d in dirs
+                if d
+                not in [
+                    "__pycache__",
+                    ".git",
+                    "node_modules",
+                    "build",
+                    "dist",
+                    "venv",
+                    ".idea",
+                    "icn_env",
+                ]
+            ]
 
             for file in files:
                 file_path = os.path.join(root, file)
@@ -120,11 +171,13 @@ def concatenate_code_files(source_dir, output_file, extensions=None, max_depth=2
                         continue
 
                     # Check for binary content
-                    with open(file_path, 'rb') as binary_check:
-                        if b'\0' in binary_check.read(1024):
+                    with open(file_path, "rb") as binary_check:
+                        if b"\0" in binary_check.read(1024):
                             continue
 
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as infile:
+                    with open(
+                        file_path, "r", encoding="utf-8", errors="ignore"
+                    ) as infile:
                         outfile.write(f"\n\n# {'='*20} {file_path} {'='*20}\n\n")
                         outfile.write(infile.read())
                 except Exception as e:
@@ -132,8 +185,9 @@ def concatenate_code_files(source_dir, output_file, extensions=None, max_depth=2
 
     print(f"Concatenation complete! Check the output file: {output_file}")
 
+
 # Example usage
-concatenate_code_files('/home/matt/icn-prototype', 'ICN_code_dump.txt', max_depth=2)
+concatenate_code_files("/home/matt/icn-prototype", "ICN_code_dump.txt", max_depth=2)
 
 
 # ==================== /home/matt/icn-prototype/setup.py ====================
@@ -174,9 +228,11 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class Credential:
     """Verifiable credential for the ICN system."""
+
     issuer: str
     subject: str
     claims: Dict
@@ -195,24 +251,25 @@ class Credential:
         """Revoke the credential."""
         self.expires_at = datetime.now()
 
+
 class IdentityProvider(ABC):
     """Abstract base class for identity providers."""
-    
+
     @abstractmethod
     def issue_credential(self, subject: str, claims: Dict) -> Credential:
         pass
-    
+
     @abstractmethod
     def verify_credential(self, credential: Credential) -> bool:
         pass
 
+
 class DID:
     """Decentralized Identifier implementation for ICN."""
-    
+
     def __init__(self, cooperative_id: Optional[str] = None):
         self._private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048
+            public_exponent=65537, key_size=2048
         )
         self._public_key = self._private_key.public_key()
         self.cooperative_memberships: List[str] = []
@@ -221,16 +278,16 @@ class DID:
         self.metadata: Dict = {}
         if cooperative_id:
             self.add_cooperative_membership(cooperative_id)
-        
+
         # Create encryption key for sensitive data
         self._encryption_key = Fernet.generate_key()
         self._cipher_suite = Fernet(self._encryption_key)
-        
+
     def generate_did(self) -> str:
         """Generate the DID string."""
         pub_bytes = self._public_key.public_bytes(
             encoding=serialization.Encoding.DER,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
         return f"did:icn:{hashlib.sha256(pub_bytes).hexdigest()[:16]}"
 
@@ -242,8 +299,8 @@ class DID:
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
-                    label=None
-                )
+                    label=None,
+                ),
             )
         except Exception as e:
             logger.error(f"Encryption failed: {e}")
@@ -257,8 +314,8 @@ class DID:
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
-                    label=None
-                )
+                    label=None,
+                ),
             )
             return decrypted.decode()
         except Exception as e:
@@ -271,19 +328,20 @@ class DID:
             self.cooperative_memberships.append(cooperative_id)
             logger.info(f"Added membership to cooperative: {cooperative_id}")
 
-    def update_reputation(self, category: str, score: float, 
-                         evidence: Optional[Dict] = None) -> None:
+    def update_reputation(
+        self, category: str, score: float, evidence: Optional[Dict] = None
+    ) -> None:
         """Update reputation score with optional evidence."""
         if score < 0:
             logger.warning(f"Negative reputation score update: {score}")
-        
+
         old_score = self.reputation_scores.get(category, 0)
         self.reputation_scores[category] = old_score + score
-        
+
         if evidence:
-            if 'reputation_evidence' not in self.metadata:
-                self.metadata['reputation_evidence'] = {}
-            self.metadata['reputation_evidence'][category] = evidence
+            if "reputation_evidence" not in self.metadata:
+                self.metadata["reputation_evidence"] = {}
+            self.metadata["reputation_evidence"][category] = evidence
 
     def get_total_reputation(self) -> float:
         """Calculate total reputation across all categories."""
@@ -292,23 +350,24 @@ class DID:
     def export_public_credentials(self) -> Dict:
         """Export public credentials and memberships."""
         return {
-            'did': self.generate_did(),
-            'cooperative_memberships': self.cooperative_memberships,
-            'reputation_scores': self.reputation_scores,
-            'public_credentials': [
-                {k: v for k, v in c.__dict__.items() if k != 'proof'}
+            "did": self.generate_did(),
+            "cooperative_memberships": self.cooperative_memberships,
+            "reputation_scores": self.reputation_scores,
+            "public_credentials": [
+                {k: v for k, v in c.__dict__.items() if k != "proof"}
                 for c in self.credentials
-            ]
+            ],
         }
+
 
 class DIDRegistry:
     """Registry for DIDs in the ICN system."""
-    
+
     def __init__(self):
         self.dids: Dict[str, DID] = {}
         self.revoked_dids: Dict[str, datetime] = {}
         self._identity_providers: Dict[str, IdentityProvider] = {}
-        
+
     def register_did(self, did: DID) -> str:
         """Register a new DID."""
         did_id = did.generate_did()
@@ -338,8 +397,7 @@ class DIDRegistry:
             del self.dids[did_id]
             logger.warning(f"DID revoked: {did_id}, reason: {reason}")
 
-    def register_identity_provider(self, name: str, 
-                                 provider: IdentityProvider) -> None:
+    def register_identity_provider(self, name: str, provider: IdentityProvider) -> None:
         """Register a new identity provider."""
         self._identity_providers[name] = provider
         logger.info(f"Registered identity provider: {name}")
@@ -347,6 +405,7 @@ class DIDRegistry:
     def get_identity_provider(self, name: str) -> Optional[IdentityProvider]:
         """Get an identity provider by name."""
         return self._identity_providers.get(name)
+
 
 # ==================== /home/matt/icn-prototype/did/__init__.py ====================
 
@@ -356,11 +415,17 @@ class DIDRegistry:
 
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 from flask import Flask, request, jsonify
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
+)
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from blockchain.blockchain import Blockchain
@@ -370,7 +435,7 @@ from system.marketplace import Marketplace
 from system.storage import DistributedStorage
 
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = 'your_jwt_secret_key'  # Replace with a secure key
+app.config["JWT_SECRET_KEY"] = "your_jwt_secret_key"  # Replace with a secure key
 jwt = JWTManager(app)
 
 blockchain = Blockchain()
@@ -381,22 +446,26 @@ storage = DistributedStorage(blockchain)
 
 users_db = {}
 
+
 def role_required(required_role):
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
             current_user = get_jwt_identity()
-            if current_user['role'] != required_role:
+            if current_user["role"] != required_role:
                 return jsonify({"message": "Access forbidden: insufficient role"}), 403
             return f(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
-@app.route('/register', methods=['POST'])
+
+@app.route("/register", methods=["POST"])
 def register():
-    username = request.json.get('username')
-    password = request.json.get('password')
-    role = request.json.get('role', 'user')
+    username = request.json.get("username")
+    password = request.json.get("password")
+    role = request.json.get("role", "user")
 
     if username in users_db:
         return jsonify({"message": "User already exists"}), 400
@@ -407,103 +476,120 @@ def register():
     hashed_password = generate_password_hash(password)
     users_db[username] = {"password": hashed_password, "role": role, "did": did_id}
 
-    return jsonify({"message": f"User {username} registered successfully", "did": did_id}), 201
+    return (
+        jsonify({"message": f"User {username} registered successfully", "did": did_id}),
+        201,
+    )
 
-@app.route('/login', methods=['POST'])
+
+@app.route("/login", methods=["POST"])
 def login():
-    username = request.json.get('username')
-    password = request.json.get('password')
+    username = request.json.get("username")
+    password = request.json.get("password")
 
     user = users_db.get(username)
 
-    if not user or not check_password_hash(user['password'], password):
+    if not user or not check_password_hash(user["password"], password):
         return jsonify({"message": "Invalid username or password"}), 401
 
-    access_token = create_access_token(identity={"username": username, "role": user['role'], "did": user['did']})
+    access_token = create_access_token(
+        identity={"username": username, "role": user["role"], "did": user["did"]}
+    )
     return jsonify(access_token=access_token), 200
 
-@app.route('/create_proposal', methods=['POST'])
+
+@app.route("/create_proposal", methods=["POST"])
 @jwt_required()
 def create_proposal():
     current_user = get_jwt_identity()
     proposal_data = request.json
     proposal = Proposal(
         id=f"proposal_{len(governance.proposals) + 1}",
-        title=proposal_data['title'],
-        description=proposal_data['description'],
-        creator=current_user['did'],
-        proposal_type=proposal_data['type'],
-        options=proposal_data.get('options'),
-        amount=proposal_data.get('amount'),
-        stages=proposal_data.get('stages')
+        title=proposal_data["title"],
+        description=proposal_data["description"],
+        creator=current_user["did"],
+        proposal_type=proposal_data["type"],
+        options=proposal_data.get("options"),
+        amount=proposal_data.get("amount"),
+        stages=proposal_data.get("stages"),
     )
     proposal_id = governance.create_proposal(proposal)
     return jsonify({"message": "Proposal created", "proposal_id": proposal_id}), 201
 
-@app.route('/vote', methods=['POST'])
+
+@app.route("/vote", methods=["POST"])
 @jwt_required()
 def vote():
     current_user = get_jwt_identity()
-    proposal_id = request.json.get('proposal_id')
-    vote = request.json.get('vote')
-    voting_power = request.json.get('voting_power', 1)
+    proposal_id = request.json.get("proposal_id")
+    vote = request.json.get("vote")
+    voting_power = request.json.get("voting_power", 1)
 
-    if governance.cast_vote(proposal_id, vote, current_user['did'], voting_power):
+    if governance.cast_vote(proposal_id, vote, current_user["did"], voting_power):
         return jsonify({"message": "Vote cast successfully"}), 200
     return jsonify({"message": "Failed to cast vote"}), 400
 
-@app.route('/finalize_proposal', methods=['POST'])
+
+@app.route("/finalize_proposal", methods=["POST"])
 @jwt_required()
-@role_required('admin')
+@role_required("admin")
 def finalize_proposal():
-    proposal_id = request.json.get('proposal_id')
+    proposal_id = request.json.get("proposal_id")
 
     if governance.finalize_proposal(proposal_id):
         return jsonify({"message": "Proposal finalized successfully"}), 200
     return jsonify({"message": "Failed to finalize proposal"}), 400
 
-@app.route('/create_listing', methods=['POST'])
+
+@app.route("/create_listing", methods=["POST"])
 @jwt_required()
 def create_listing():
     current_user = get_jwt_identity()
     listing_data = request.json
     listing_id = marketplace.create_listing(
         f"listing_{len(marketplace.listings) + 1}",
-        current_user['did'],
-        listing_data['item'],
-        listing_data['price']
+        current_user["did"],
+        listing_data["item"],
+        listing_data["price"],
     )
     if listing_id:
         return jsonify({"message": "Listing created", "listing_id": listing_id}), 201
     return jsonify({"message": "Failed to create listing"}), 400
 
-@app.route('/place_order', methods=['POST'])
+
+@app.route("/place_order", methods=["POST"])
 @jwt_required()
 def place_order():
     current_user = get_jwt_identity()
     order_data = request.json
     order_id = f"order_{len(marketplace.orders) + 1}"
-    if marketplace.place_order(order_id, current_user['did'], order_data['listing_id']):
+    if marketplace.place_order(order_id, current_user["did"], order_data["listing_id"]):
         return jsonify({"message": "Order placed", "order_id": order_id}), 201
     return jsonify({"message": "Failed to place order"}), 400
 
-@app.route('/complete_order', methods=['POST'])
+
+@app.route("/complete_order", methods=["POST"])
 @jwt_required()
 def complete_order():
-    order_id = request.json.get('order_id')
+    order_id = request.json.get("order_id")
     completed_order = marketplace.complete_order(order_id)
     if completed_order:
-        return jsonify({"message": "Order completed", "order": completed_order.__dict__}), 200
+        return (
+            jsonify({"message": "Order completed", "order": completed_order.__dict__}),
+            200,
+        )
     return jsonify({"message": "Failed to complete order"}), 400
 
-@app.route('/store_file', methods=['POST'])
+
+@app.route("/store_file", methods=["POST"])
 @jwt_required()
 def store_file():
-    file = request.files['file']
+    file = request.files["file"]
     file_hash = storage.store_file(file.filename, file.read())
     return jsonify({"message": "File stored", "file_hash": file_hash}), 201
 
-@app.route('/retrieve_file/<file_hash>', methods=['GET'])
+
+@app.route("/retrieve_file/<file_hash>", methods=["GET"])
 @jwt_required()
 def retrieve_file(file_hash):
     file_data = storage.retrieve_file(file_hash)
@@ -511,8 +597,10 @@ def retrieve_file(file_hash):
         return file_data, 200
     return jsonify({"message": "File not found"}), 404
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app.run(debug=True)
+
 
 # ==================== /home/matt/icn-prototype/api/__init__.py ====================
 
@@ -3245,52 +3333,52 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
 class CryptoUtils:
     """
     Utility class for cryptographic operations.
-    
+
     Provides methods for:
     - Key generation and management
     - Signing and verification
     - Hashing
     - Encryption and decryption
     """
-    
+
     @staticmethod
     def generate_key_pair(key_size: int = 2048) -> Tuple[bytes, bytes]:
         """
         Generate a new RSA key pair.
-        
+
         Args:
             key_size: Size of the key in bits
-            
+
         Returns:
             Tuple of (private_key, public_key) in PEM format
         """
         try:
             # Generate private key
             private_key = rsa.generate_private_key(
-                public_exponent=65537,
-                key_size=key_size
+                public_exponent=65537, key_size=key_size
             )
-            
+
             # Get public key
             public_key = private_key.public_key()
-            
+
             # Serialize keys
             private_pem = private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
+                encryption_algorithm=serialization.NoEncryption(),
             )
-            
+
             public_pem = public_key.public_bytes(
                 encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
             )
-            
+
             return private_pem, public_pem
-            
+
         except Exception as e:
             logger.error(f"Key generation failed: {str(e)}")
             raise
@@ -3299,68 +3387,68 @@ class CryptoUtils:
     def sign_message(message: bytes, private_key_pem: bytes) -> bytes:
         """
         Sign a message using a private key.
-        
+
         Args:
             message: Message to sign
             private_key_pem: Private key in PEM format
-            
+
         Returns:
             bytes: Signature
         """
         try:
             # Load private key
             private_key = serialization.load_pem_private_key(
-                private_key_pem,
-                password=None
+                private_key_pem, password=None
             )
-            
+
             # Create signature
             signature = private_key.sign(
                 message,
                 padding.PSS(
                     mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
+                    salt_length=padding.PSS.MAX_LENGTH,
                 ),
-                hashes.SHA256()
+                hashes.SHA256(),
             )
-            
+
             return signature
-            
+
         except Exception as e:
             logger.error(f"Signing failed: {str(e)}")
             raise
 
     @staticmethod
-    def verify_signature(message: bytes, signature: bytes,
-                        public_key_pem: bytes) -> bool:
+    def verify_signature(
+        message: bytes, signature: bytes, public_key_pem: bytes
+    ) -> bool:
         """
         Verify a signature using a public key.
-        
+
         Args:
             message: Original message
             signature: Signature to verify
             public_key_pem: Public key in PEM format
-            
+
         Returns:
             bool: True if signature is valid
         """
         try:
             # Load public key
             public_key = serialization.load_pem_public_key(public_key_pem)
-            
+
             # Verify signature
             public_key.verify(
                 signature,
                 message,
                 padding.PSS(
                     mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
+                    salt_length=padding.PSS.MAX_LENGTH,
                 ),
-                hashes.SHA256()
+                hashes.SHA256(),
             )
-            
+
             return True
-            
+
         except InvalidSignature:
             return False
         except Exception as e:
@@ -3371,10 +3459,10 @@ class CryptoUtils:
     def hash_data(data: bytes) -> str:
         """
         Create SHA-256 hash of data.
-        
+
         Args:
             data: Data to hash
-            
+
         Returns:
             str: Hexadecimal hash string
         """
@@ -3388,10 +3476,10 @@ class CryptoUtils:
     def double_hash(data: bytes) -> str:
         """
         Create double SHA-256 hash (as used in Bitcoin).
-        
+
         Args:
             data: Data to hash
-            
+
         Returns:
             str: Hexadecimal double hash string
         """
@@ -3405,34 +3493,34 @@ class CryptoUtils:
     def merkle_root(hash_list: list) -> Optional[str]:
         """
         Calculate Merkle root from list of hashes.
-        
+
         Args:
             hash_list: List of hash strings
-            
+
         Returns:
             str: Merkle root hash or None if list is empty
         """
         try:
             if not hash_list:
                 return None
-                
+
             if len(hash_list) == 1:
                 return hash_list[0]
-                
+
             # Ensure even number of hashes
             if len(hash_list) % 2 == 1:
                 hash_list.append(hash_list[-1])
-                
+
             # Pair hashes and hash together
             new_hash_list = []
             for i in range(0, len(hash_list), 2):
                 combined = hash_list[i] + hash_list[i + 1]
                 new_hash = hashlib.sha256(combined.encode()).hexdigest()
                 new_hash_list.append(new_hash)
-                
+
             # Recurse until single hash remains
             return CryptoUtils.merkle_root(new_hash_list)
-            
+
         except Exception as e:
             logger.error(f"Merkle root calculation failed: {str(e)}")
             raise
@@ -3441,7 +3529,7 @@ class CryptoUtils:
     def create_timestamp() -> str:
         """Create RFC 3339 formatted timestamp."""
         try:
-            return datetime.utcnow().isoformat() + 'Z'
+            return datetime.utcnow().isoformat() + "Z"
         except Exception as e:
             logger.error(f"Timestamp creation failed: {str(e)}")
             raise
@@ -3450,20 +3538,21 @@ class CryptoUtils:
     def verify_proof_of_work(cls, block_header: bytes, difficulty: int) -> bool:
         """
         Verify proof of work for a block.
-        
+
         Args:
             block_header: Block header data
             difficulty: Number of leading zeros required
-            
+
         Returns:
             bool: True if proof of work is valid
         """
         try:
             block_hash = cls.hash_data(block_header)
-            return block_hash.startswith('0' * difficulty)
+            return block_hash.startswith("0" * difficulty)
         except Exception as e:
             logger.error(f"Proof of work verification failed: {str(e)}")
             return False
+
 
 # ==================== /home/matt/icn-prototype/blockchain/core/node.py ====================
 
@@ -3477,41 +3566,46 @@ import json
 
 logger = logging.getLogger(__name__)
 
+
 class Node:
     """
     Represents a node in the ICN network.
-    
+
     A node is a participant in the network that can validate transactions,
     participate in consensus, and maintain portions of the blockchain.
     """
-    
-    def __init__(self, node_id: str, cooperative_id: Optional[str] = None,
-                 initial_stake: float = 10.0):
+
+    def __init__(
+        self,
+        node_id: str,
+        cooperative_id: Optional[str] = None,
+        initial_stake: float = 10.0,
+    ):
         self.node_id = node_id
         self.cooperative_id = cooperative_id
         self.reputation_scores = {
-            'validation': 0.0,
-            'proposal_creation': 0.0,
-            'voting': 0.0,
-            'resource_sharing': 0.0,
-            'cooperative_growth': 0.0,
-            'community_building': 0.0,
-            'conflict_resolution': 0.0,
-            'transaction_validation': 0.0,
-            'data_availability': 0.0,
-            'network_stability': 0.0,
-            'innovation': 0.0,
-            'sustainability': 0.0
+            "validation": 0.0,
+            "proposal_creation": 0.0,
+            "voting": 0.0,
+            "resource_sharing": 0.0,
+            "cooperative_growth": 0.0,
+            "community_building": 0.0,
+            "conflict_resolution": 0.0,
+            "transaction_validation": 0.0,
+            "data_availability": 0.0,
+            "network_stability": 0.0,
+            "innovation": 0.0,
+            "sustainability": 0.0,
         }
         self.stake = initial_stake
         self.cooperative_interactions: List[str] = []
         self.validation_history: List[Dict] = []
         self.resource_usage: Dict[str, float] = {
-            'computation': 0.0,
-            'storage': 0.0,
-            'bandwidth': 0.0,
-            'memory': 0.0,
-            'energy': 0.0
+            "computation": 0.0,
+            "storage": 0.0,
+            "bandwidth": 0.0,
+            "memory": 0.0,
+            "energy": 0.0,
         }
         self.shard_assignments: Set[int] = set()
         self.active_shards: Dict[int, datetime] = {}
@@ -3519,22 +3613,26 @@ class Node:
         self.total_validations = 0
         self.cooldown = 0
         self.performance_metrics: Dict[str, float] = {
-            'response_time': 0.0,
-            'availability': 100.0,
-            'validation_success_rate': 100.0,
-            'network_reliability': 100.0
+            "response_time": 0.0,
+            "availability": 100.0,
+            "validation_success_rate": 100.0,
+            "network_reliability": 100.0,
         }
         self.metadata: Dict = {
-            'creation_time': datetime.now(),
-            'last_active': datetime.now(),
-            'version': "1.0",
-            'capabilities': set(),
-            'status': "active"
+            "creation_time": datetime.now(),
+            "last_active": datetime.now(),
+            "version": "1.0",
+            "capabilities": set(),
+            "status": "active",
         }
 
-    def update_reputation(self, category: str, score: float, 
-                         cooperative_id: Optional[str] = None,
-                         evidence: Optional[Dict] = None) -> bool:
+    def update_reputation(
+        self,
+        category: str,
+        score: float,
+        cooperative_id: Optional[str] = None,
+        evidence: Optional[Dict] = None,
+    ) -> bool:
         """Update reputation score for a category with evidence."""
         try:
             if category not in self.reputation_scores:
@@ -3543,28 +3641,30 @@ class Node:
 
             old_score = self.reputation_scores[category]
             self.reputation_scores[category] = max(0, old_score + score)
-            
+
             if cooperative_id:
                 self.cooperative_interactions.append(cooperative_id)
-                
+
             if evidence:
-                self.validation_history.append({
-                    'timestamp': datetime.now(),
-                    'category': category,
-                    'score_change': score,
-                    'evidence': evidence
-                })
-            
-            self.metadata['last_active'] = datetime.now()
-            
+                self.validation_history.append(
+                    {
+                        "timestamp": datetime.now(),
+                        "category": category,
+                        "score_change": score,
+                        "evidence": evidence,
+                    }
+                )
+
+            self.metadata["last_active"] = datetime.now()
+
             # Trim history if needed
             if len(self.cooperative_interactions) > 1000:
                 self.cooperative_interactions = self.cooperative_interactions[-1000:]
             if len(self.validation_history) > 1000:
                 self.validation_history = self.validation_history[-1000:]
-                
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to update reputation: {str(e)}")
             return False
@@ -3574,7 +3674,7 @@ class Node:
         if len(self.active_shards) >= 3:  # Maximum 3 active shards per node
             logger.warning(f"Node {self.node_id} already assigned to maximum shards")
             return False
-            
+
         self.shard_assignments.add(shard_id)
         self.active_shards[shard_id] = datetime.now()
         logger.info(f"Node {self.node_id} assigned to shard {shard_id}")
@@ -3592,45 +3692,57 @@ class Node:
     def can_validate(self, shard_id: Optional[int] = None) -> bool:
         """Check if node can validate blocks."""
         current_time = datetime.now().timestamp()
-        
+
         # Basic validation checks
         if self.cooldown > 0:
             return False
-            
-        if current_time - self.last_validation < 10:  # 10 second minimum between validations
+
+        if (
+            current_time - self.last_validation < 10
+        ):  # 10 second minimum between validations
             return False
-            
-        if self.metadata['status'] != "active":
+
+        if self.metadata["status"] != "active":
             return False
-            
+
         # Shard-specific validation
         if shard_id is not None:
             if shard_id not in self.active_shards:
                 return False
-                
+
             shard_time = self.active_shards[shard_id]
             if (datetime.now() - shard_time).total_seconds() > 3600:  # 1 hour timeout
                 return False
-                
+
         return True
 
     def enter_cooldown(self, cooldown_period: int) -> None:
         """Put node into cooldown period."""
         self.cooldown = cooldown_period
-        self.metadata['status'] = "cooldown"
-        logger.info(f"Node {self.node_id} entered cooldown for {cooldown_period} periods")
+        self.metadata["status"] = "cooldown"
+        logger.info(
+            f"Node {self.node_id} entered cooldown for {cooldown_period} periods"
+        )
 
     def update_metrics(self, metrics: Dict[str, float]) -> None:
         """Update node performance metrics."""
         self.performance_metrics.update(metrics)
-        self.metadata['last_active'] = datetime.now()
-        
+        self.metadata["last_active"] = datetime.now()
+
         # Calculate validation success rate
         if self.total_validations > 0:
-            success_rate = len([v for v in self.validation_history 
-                              if v.get('evidence', {}).get('success', False)
-                             ]) / self.total_validations * 100
-            self.performance_metrics['validation_success_rate'] = success_rate
+            success_rate = (
+                len(
+                    [
+                        v
+                        for v in self.validation_history
+                        if v.get("evidence", {}).get("success", False)
+                    ]
+                )
+                / self.total_validations
+                * 100
+            )
+            self.performance_metrics["validation_success_rate"] = success_rate
 
     def get_total_reputation(self) -> float:
         """Calculate total reputation across all categories."""
@@ -3641,31 +3753,29 @@ class Node:
         for resource, amount in usage.items():
             if resource in self.resource_usage:
                 self.resource_usage[resource] += amount
-                
+
         # Update availability based on resource usage
         total_usage = sum(self.resource_usage.values())
-        self.performance_metrics['availability'] = max(0, 100 - (total_usage / 5))
+        self.performance_metrics["availability"] = max(0, 100 - (total_usage / 5))
 
     def to_dict(self) -> Dict:
         """Convert node state to dictionary."""
         return {
-            'node_id': self.node_id,
-            'cooperative_id': self.cooperative_id,
-            'reputation_scores': self.reputation_scores,
-            'stake': self.stake,
-            'shard_assignments': list(self.shard_assignments),
-            'active_shards': {
-                k: v.isoformat() for k, v in self.active_shards.items()
-            },
-            'performance_metrics': self.performance_metrics,
-            'resource_usage': self.resource_usage,
-            'metadata': {
+            "node_id": self.node_id,
+            "cooperative_id": self.cooperative_id,
+            "reputation_scores": self.reputation_scores,
+            "stake": self.stake,
+            "shard_assignments": list(self.shard_assignments),
+            "active_shards": {k: v.isoformat() for k, v in self.active_shards.items()},
+            "performance_metrics": self.performance_metrics,
+            "resource_usage": self.resource_usage,
+            "metadata": {
                 **self.metadata,
-                'creation_time': self.metadata['creation_time'].isoformat(),
-                'last_active': self.metadata['last_active'].isoformat(),
-                'capabilities': list(self.metadata['capabilities'])
+                "creation_time": self.metadata["creation_time"].isoformat(),
+                "last_active": self.metadata["last_active"].isoformat(),
+                "capabilities": list(self.metadata["capabilities"]),
             },
-            'status': self.metadata['status']
+            "status": self.metadata["status"],
         }
 
     @classmethod
@@ -3673,41 +3783,44 @@ class Node:
         """Create node from dictionary."""
         try:
             node = cls(
-                node_id=data['node_id'],
-                cooperative_id=data['cooperative_id'],
-                initial_stake=data['stake']
+                node_id=data["node_id"],
+                cooperative_id=data["cooperative_id"],
+                initial_stake=data["stake"],
             )
-            node.reputation_scores = data['reputation_scores']
-            node.shard_assignments = set(data['shard_assignments'])
+            node.reputation_scores = data["reputation_scores"]
+            node.shard_assignments = set(data["shard_assignments"])
             node.active_shards = {
                 int(k): datetime.fromisoformat(v)
-                for k, v in data['active_shards'].items()
+                for k, v in data["active_shards"].items()
             }
-            node.performance_metrics = data['performance_metrics']
-            node.resource_usage = data['resource_usage']
-            
+            node.performance_metrics = data["performance_metrics"]
+            node.resource_usage = data["resource_usage"]
+
             # Restore metadata
-            node.metadata.update(data['metadata'])
-            node.metadata['creation_time'] = datetime.fromisoformat(
-                data['metadata']['creation_time']
+            node.metadata.update(data["metadata"])
+            node.metadata["creation_time"] = datetime.fromisoformat(
+                data["metadata"]["creation_time"]
             )
-            node.metadata['last_active'] = datetime.fromisoformat(
-                data['metadata']['last_active']
+            node.metadata["last_active"] = datetime.fromisoformat(
+                data["metadata"]["last_active"]
             )
-            node.metadata['capabilities'] = set(data['metadata']['capabilities'])
-            
+            node.metadata["capabilities"] = set(data["metadata"]["capabilities"])
+
             return node
-            
+
         except Exception as e:
             logger.error(f"Failed to create node from dictionary: {str(e)}")
             raise ValueError("Invalid node data")
 
     def __str__(self) -> str:
         """Return a human-readable string representation of the node."""
-        return (f"Node(id={self.node_id}, "
-                f"coop={self.cooperative_id}, "
-                f"status={self.metadata['status']}, "
-                f"rep={self.get_total_reputation():.2f})")
+        return (
+            f"Node(id={self.node_id}, "
+            f"coop={self.cooperative_id}, "
+            f"status={self.metadata['status']}, "
+            f"rep={self.get_total_reputation():.2f})"
+        )
+
 
 # ==================== /home/matt/icn-prototype/blockchain/core/block.py ====================
 
@@ -3723,15 +3836,17 @@ from .transaction import Transaction
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class Block:
     """
     Represents a block in the ICN blockchain.
-    
+
     A block contains a list of transactions and forms part of the blockchain.
     Each block includes cryptographic links to the previous block to maintain
     chain integrity.
     """
+
     index: int
     previous_hash: str
     timestamp: datetime
@@ -3744,90 +3859,96 @@ class Block:
     cross_shard_refs: List[str] = field(default_factory=list)
     metadata: Dict = field(default_factory=dict)
     version: str = "1.0"
-    
+
     def __post_init__(self) -> None:
         """Initialize block after creation."""
         if not self.merkle_root:
             self.merkle_root = self.calculate_merkle_root()
         if not self.hash:
             self.hash = self.calculate_hash()
-        self.metadata['created_at'] = datetime.now().isoformat()
+        self.metadata["created_at"] = datetime.now().isoformat()
 
     def calculate_merkle_root(self) -> str:
         """Calculate the Merkle root of transactions."""
         if not self.transactions:
             return hashlib.sha256(b"empty").hexdigest()
-        
-        leaves = [hashlib.sha256(json.dumps(tx.to_dict()).encode()).hexdigest()
-                 for tx in self.transactions]
-        
+
+        leaves = [
+            hashlib.sha256(json.dumps(tx.to_dict()).encode()).hexdigest()
+            for tx in self.transactions
+        ]
+
         while len(leaves) > 1:
             if len(leaves) % 2 == 1:
                 leaves.append(leaves[-1])
-            leaves = [hashlib.sha256((a + b).encode()).hexdigest()
-                     for a, b in zip(leaves[::2], leaves[1::2])]
-        
+            leaves = [
+                hashlib.sha256((a + b).encode()).hexdigest()
+                for a, b in zip(leaves[::2], leaves[1::2])
+            ]
+
         return leaves[0]
 
     def calculate_hash(self) -> str:
         """Calculate the hash of the block."""
         block_dict = {
-            'index': self.index,
-            'previous_hash': self.previous_hash,
-            'timestamp': self.timestamp.isoformat(),
-            'merkle_root': self.merkle_root,
-            'validator': self.validator,
-            'nonce': self.nonce,
-            'shard_id': self.shard_id,
-            'cross_shard_refs': self.cross_shard_refs,
-            'version': self.version
+            "index": self.index,
+            "previous_hash": self.previous_hash,
+            "timestamp": self.timestamp.isoformat(),
+            "merkle_root": self.merkle_root,
+            "validator": self.validator,
+            "nonce": self.nonce,
+            "shard_id": self.shard_id,
+            "cross_shard_refs": self.cross_shard_refs,
+            "version": self.version,
         }
-        return hashlib.sha256(json.dumps(block_dict, sort_keys=True).encode()).hexdigest()
+        return hashlib.sha256(
+            json.dumps(block_dict, sort_keys=True).encode()
+        ).hexdigest()
 
-    def validate(self, previous_block: Optional['Block'] = None) -> bool:
+    def validate(self, previous_block: Optional["Block"] = None) -> bool:
         """Validate block structure and consistency."""
         try:
             # Validate block hash
             if self.hash != self.calculate_hash():
                 logger.error("Invalid block hash")
                 return False
-                
+
             # Validate merkle root
             if self.merkle_root != self.calculate_merkle_root():
                 logger.error("Invalid merkle root")
                 return False
-                
+
             # Validate timestamp
             now = datetime.now()
             if self.timestamp > now + timedelta(minutes=5):
                 logger.error("Block timestamp is in the future")
                 return False
-                
+
             # Validate transactions
             if not all(isinstance(tx, Transaction) for tx in self.transactions):
                 logger.error("Invalid transaction type in block")
                 return False
-                
+
             if not all(tx.validate() for tx in self.transactions):
                 logger.error("Invalid transaction in block")
                 return False
-                
+
             # Validate against previous block if provided
             if previous_block:
                 if self.previous_hash != previous_block.hash:
                     logger.error("Block previous_hash doesn't match previous block")
                     return False
-                    
+
                 if self.index != previous_block.index + 1:
                     logger.error("Block index is not sequential")
                     return False
-                    
+
                 if self.timestamp <= previous_block.timestamp:
                     logger.error("Block timestamp is not after previous block")
                     return False
-                    
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Block validation failed: {str(e)}")
             return False
@@ -3837,11 +3958,11 @@ class Block:
         if not transaction.validate():
             logger.error("Cannot add invalid transaction to block")
             return False
-            
+
         if transaction.shard_id != self.shard_id:
             logger.error("Transaction shard_id doesn't match block")
             return False
-            
+
         self.transactions.append(transaction)
         self.merkle_root = self.calculate_merkle_root()
         self.hash = self.calculate_hash()
@@ -3850,40 +3971,40 @@ class Block:
     def to_dict(self) -> Dict:
         """Convert block to dictionary format."""
         return {
-            'index': self.index,
-            'previous_hash': self.previous_hash,
-            'timestamp': self.timestamp.isoformat(),
-            'transactions': [tx.to_dict() for tx in self.transactions],
-            'validator': self.validator,
-            'hash': self.hash,
-            'nonce': self.nonce,
-            'merkle_root': self.merkle_root,
-            'shard_id': self.shard_id,
-            'cross_shard_refs': self.cross_shard_refs,
-            'metadata': self.metadata,
-            'version': self.version
+            "index": self.index,
+            "previous_hash": self.previous_hash,
+            "timestamp": self.timestamp.isoformat(),
+            "transactions": [tx.to_dict() for tx in self.transactions],
+            "validator": self.validator,
+            "hash": self.hash,
+            "nonce": self.nonce,
+            "merkle_root": self.merkle_root,
+            "shard_id": self.shard_id,
+            "cross_shard_refs": self.cross_shard_refs,
+            "metadata": self.metadata,
+            "version": self.version,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'Block':
+    def from_dict(cls, data: Dict) -> "Block":
         """Create block from dictionary."""
         try:
-            transactions = [Transaction.from_dict(tx) for tx in data['transactions']]
-            timestamp = datetime.fromisoformat(data['timestamp'])
-            
+            transactions = [Transaction.from_dict(tx) for tx in data["transactions"]]
+            timestamp = datetime.fromisoformat(data["timestamp"])
+
             return cls(
-                index=data['index'],
-                previous_hash=data['previous_hash'],
+                index=data["index"],
+                previous_hash=data["previous_hash"],
                 timestamp=timestamp,
                 transactions=transactions,
-                validator=data['validator'],
-                shard_id=data['shard_id'],
-                hash=data['hash'],
-                nonce=data['nonce'],
-                merkle_root=data['merkle_root'],
-                cross_shard_refs=data.get('cross_shard_refs', []),
-                metadata=data.get('metadata', {}),
-                version=data.get('version', "1.0")
+                validator=data["validator"],
+                shard_id=data["shard_id"],
+                hash=data["hash"],
+                nonce=data["nonce"],
+                merkle_root=data["merkle_root"],
+                cross_shard_refs=data.get("cross_shard_refs", []),
+                metadata=data.get("metadata", {}),
+                version=data.get("version", "1.0"),
             )
         except Exception as e:
             logger.error(f"Failed to create block from dictionary: {str(e)}")
@@ -3891,10 +4012,13 @@ class Block:
 
     def __str__(self) -> str:
         """Return a human-readable string representation of the block."""
-        return (f"Block(index={self.index}, "
-                f"hash={self.hash[:8]}..., "
-                f"tx_count={len(self.transactions)}, "
-                f"shard={self.shard_id})")
+        return (
+            f"Block(index={self.index}, "
+            f"hash={self.hash[:8]}..., "
+            f"tx_count={len(self.transactions)}, "
+            f"shard={self.shard_id})"
+        )
+
 
 # ==================== /home/matt/icn-prototype/blockchain/core/transaction.py ====================
 
@@ -3911,14 +4035,16 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class Transaction:
     """
     Represents a transaction in the ICN blockchain.
-    
+
     A transaction is the fundamental unit of record in the blockchain, representing
     any action or data transfer between parties in the network.
     """
+
     sender: str
     receiver: str
     action: str
@@ -3927,7 +4053,7 @@ class Transaction:
     signature: Optional[bytes] = None
     shard_id: Optional[int] = None
     transaction_id: str = field(init=False)
-    
+
     def __post_init__(self) -> None:
         """Initialize transaction ID and perform validation after creation."""
         self.transaction_id = self.calculate_id()
@@ -3937,13 +4063,13 @@ class Transaction:
     def calculate_id(self) -> str:
         """Calculate unique transaction ID using transaction data."""
         tx_data = {
-            'sender': self.sender,
-            'receiver': self.receiver,
-            'action': self.action,
-            'data': self.data,
-            'timestamp': self.timestamp.isoformat(),
-            'shard_id': self.shard_id,
-            'nonce': str(uuid4())
+            "sender": self.sender,
+            "receiver": self.receiver,
+            "action": self.action,
+            "data": self.data,
+            "timestamp": self.timestamp.isoformat(),
+            "shard_id": self.shard_id,
+            "nonce": str(uuid4()),
         }
         serialized = json.dumps(tx_data, sort_keys=True)
         return hashlib.sha256(serialized.encode()).hexdigest()
@@ -3955,39 +4081,39 @@ class Transaction:
             if not all([self.sender, self.receiver, self.action]):
                 logger.error("Missing required transaction fields")
                 return False
-            
+
             # Validate timestamp
             now = datetime.now()
             if self.timestamp > now + timedelta(minutes=5):
                 logger.error(f"Transaction timestamp {self.timestamp} is in the future")
                 return False
-            
+
             if self.timestamp < now - timedelta(days=1):
                 logger.error(f"Transaction timestamp {self.timestamp} is too old")
                 return False
-                
+
             # Validate data structure
             if not isinstance(self.data, dict):
                 logger.error("Transaction data must be a dictionary")
                 return False
-                
+
             # Validate action format
             if not self.action.isalnum() or len(self.action) > 64:
                 logger.error("Invalid action format")
                 return False
-                
+
             # Validate IDs format
             if not all(isinstance(x, str) for x in [self.sender, self.receiver]):
                 logger.error("Sender and receiver must be strings")
                 return False
-                
+
             # Validate shard_id if present
             if self.shard_id is not None and not isinstance(self.shard_id, int):
                 logger.error("Invalid shard_id type")
                 return False
-                
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Transaction validation failed: {str(e)}")
             return False
@@ -3995,31 +4121,33 @@ class Transaction:
     def to_dict(self) -> Dict[str, Any]:
         """Convert transaction to dictionary format."""
         return {
-            'transaction_id': self.transaction_id,
-            'sender': self.sender,
-            'receiver': self.receiver,
-            'action': self.action,
-            'data': self.data,
-            'timestamp': self.timestamp.isoformat(),
-            'signature': self.signature.hex() if self.signature else None,
-            'shard_id': self.shard_id
+            "transaction_id": self.transaction_id,
+            "sender": self.sender,
+            "receiver": self.receiver,
+            "action": self.action,
+            "data": self.data,
+            "timestamp": self.timestamp.isoformat(),
+            "signature": self.signature.hex() if self.signature else None,
+            "shard_id": self.shard_id,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Transaction:
         """Create a transaction instance from a dictionary."""
         try:
-            timestamp = datetime.fromisoformat(data['timestamp'])
-            signature = bytes.fromhex(data['signature']) if data.get('signature') else None
-            
+            timestamp = datetime.fromisoformat(data["timestamp"])
+            signature = (
+                bytes.fromhex(data["signature"]) if data.get("signature") else None
+            )
+
             return cls(
-                sender=data['sender'],
-                receiver=data['receiver'],
-                action=data['action'],
-                data=data['data'],
+                sender=data["sender"],
+                receiver=data["receiver"],
+                action=data["action"],
+                data=data["data"],
                 timestamp=timestamp,
                 signature=signature,
-                shard_id=data.get('shard_id')
+                shard_id=data.get("shard_id"),
             )
         except Exception as e:
             logger.error(f"Failed to create transaction from dictionary: {str(e)}")
@@ -4027,10 +4155,13 @@ class Transaction:
 
     def __str__(self) -> str:
         """Return a human-readable string representation of the transaction."""
-        return (f"Transaction(id={self.transaction_id[:8]}..., "
-                f"action={self.action}, "
-                f"sender={self.sender[:8]}..., "
-                f"receiver={self.receiver[:8]}...)")
+        return (
+            f"Transaction(id={self.transaction_id[:8]}..., "
+            f"action={self.action}, "
+            f"sender={self.sender[:8]}..., "
+            f"receiver={self.receiver[:8]}...)"
+        )
+
 
 # ==================== /home/matt/icn-prototype/blockchain/core/shard.py ====================
 
@@ -4044,14 +4175,15 @@ from .block import Block
 
 logger = logging.getLogger(__name__)
 
+
 class Shard:
     """
     Represents a blockchain shard.
-    
+
     A shard is a partition of the blockchain that processes a subset of transactions,
     enabling parallel processing and improved scalability.
     """
-    
+
     def __init__(self, shard_id: int, max_transactions_per_block: int = 100):
         self.shard_id = shard_id
         self.chain: List[Block] = []
@@ -4061,10 +4193,10 @@ class Shard:
         self.last_block_time = datetime.now()
         self.state: Dict = {}  # Shard-specific state
         self.metrics: Dict = {
-            'total_transactions': 0,
-            'average_block_time': 0,
-            'blocks_created': 0,
-            'pending_count': 0
+            "total_transactions": 0,
+            "average_block_time": 0,
+            "blocks_created": 0,
+            "pending_count": 0,
         }
         self._create_genesis_block()
 
@@ -4076,34 +4208,36 @@ class Shard:
             timestamp=datetime.now(),
             transactions=[],
             validator="genesis",
-            shard_id=self.shard_id
+            shard_id=self.shard_id,
         )
         self.chain.append(genesis_block)
         self.height = 1
         self.last_block_time = genesis_block.timestamp
-        self.metrics['blocks_created'] = 1
+        self.metrics["blocks_created"] = 1
         logger.info(f"Created genesis block for shard {self.shard_id}")
 
     def add_transaction(self, transaction: Transaction) -> bool:
         """Add a new transaction to pending pool."""
         try:
             if transaction.shard_id != self.shard_id:
-                logger.error(f"Transaction shard_id {transaction.shard_id} "
-                           f"doesn't match shard {self.shard_id}")
+                logger.error(
+                    f"Transaction shard_id {transaction.shard_id} "
+                    f"doesn't match shard {self.shard_id}"
+                )
                 return False
-            
+
             if len(self.pending_transactions) >= self.max_transactions_per_block * 2:
                 logger.warning(f"Shard {self.shard_id} transaction pool full")
                 return False
-            
+
             if not transaction.validate():
                 logger.error("Invalid transaction")
                 return False
-            
+
             self.pending_transactions.append(transaction)
-            self.metrics['pending_count'] = len(self.pending_transactions)
+            self.metrics["pending_count"] = len(self.pending_transactions)
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to add transaction: {str(e)}")
             return False
@@ -4113,21 +4247,21 @@ class Shard:
         if not self.pending_transactions:
             logger.debug(f"No pending transactions in shard {self.shard_id}")
             return None
-            
+
         try:
-            transactions = self.pending_transactions[:self.max_transactions_per_block]
-            
+            transactions = self.pending_transactions[: self.max_transactions_per_block]
+
             new_block = Block(
                 index=self.height,
                 previous_hash=self.chain[-1].hash,
                 timestamp=datetime.now(),
                 transactions=transactions,
                 validator=validator,
-                shard_id=self.shard_id
+                shard_id=self.shard_id,
             )
-            
+
             return new_block
-            
+
         except Exception as e:
             logger.error(f"Failed to create block: {str(e)}")
             return None
@@ -4136,44 +4270,49 @@ class Shard:
         """Add a validated block to the shard chain."""
         try:
             if block.shard_id != self.shard_id:
-                logger.error(f"Block shard_id {block.shard_id} "
-                           f"doesn't match shard {self.shard_id}")
+                logger.error(
+                    f"Block shard_id {block.shard_id} "
+                    f"doesn't match shard {self.shard_id}"
+                )
                 return False
-            
+
             if block.index != self.height:
-                logger.error(f"Block index {block.index} "
-                           f"doesn't match current height {self.height}")
+                logger.error(
+                    f"Block index {block.index} "
+                    f"doesn't match current height {self.height}"
+                )
                 return False
-            
+
             if not block.validate(self.chain[-1]):
                 logger.error("Block validation failed")
                 return False
-            
+
             # Update metrics
             block_time = (block.timestamp - self.last_block_time).total_seconds()
-            self.metrics['average_block_time'] = (
-                (self.metrics['average_block_time'] * self.metrics['blocks_created'] + 
-                 block_time) / (self.metrics['blocks_created'] + 1)
-            )
-            self.metrics['blocks_created'] += 1
-            self.metrics['total_transactions'] += len(block.transactions)
-            
+            self.metrics["average_block_time"] = (
+                self.metrics["average_block_time"] * self.metrics["blocks_created"]
+                + block_time
+            ) / (self.metrics["blocks_created"] + 1)
+            self.metrics["blocks_created"] += 1
+            self.metrics["total_transactions"] += len(block.transactions)
+
             # Remove included transactions from pending pool
             tx_ids = {tx.transaction_id for tx in block.transactions}
             self.pending_transactions = [
-                tx for tx in self.pending_transactions 
+                tx
+                for tx in self.pending_transactions
                 if tx.transaction_id not in tx_ids
             ]
-            self.metrics['pending_count'] = len(self.pending_transactions)
-            
+            self.metrics["pending_count"] = len(self.pending_transactions)
+
             # Add block to chain
             self.chain.append(block)
             self.height += 1
             self.last_block_time = block.timestamp
-            
+
             logger.info(f"Added block {block.index} to shard {self.shard_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to add block: {str(e)}")
             return False
@@ -4182,32 +4321,32 @@ class Shard:
         """Get the latest block in this shard."""
         return self.chain[-1]
 
-# blockchain/core/shard.py (continued)
+    # blockchain/core/shard.py (continued)
 
     def validate_chain(self) -> bool:
         """Validate the entire shard chain."""
         try:
             for i in range(1, len(self.chain)):
                 current_block = self.chain[i]
-                previous_block = self.chain[i-1]
-                
+                previous_block = self.chain[i - 1]
+
                 # Validate block
                 if not current_block.validate(previous_block):
                     logger.error(f"Invalid block at height {i}")
                     return False
-                
+
                 # Validate sequence
                 if current_block.index != previous_block.index + 1:
                     logger.error(f"Non-sequential blocks at height {i}")
                     return False
-                
+
                 # Validate timestamps
                 if current_block.timestamp <= previous_block.timestamp:
                     logger.error(f"Invalid timestamp at height {i}")
                     return False
-                
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Chain validation failed: {str(e)}")
             return False
@@ -4216,8 +4355,7 @@ class Shard:
         """Retrieve a block by its hash."""
         try:
             return next(
-                (block for block in self.chain if block.hash == block_hash),
-                None
+                (block for block in self.chain if block.hash == block_hash), None
             )
         except Exception as e:
             logger.error(f"Failed to retrieve block: {str(e)}")
@@ -4250,11 +4388,12 @@ class Shard:
         try:
             current_time = datetime.now()
             self.pending_transactions = [
-                tx for tx in self.pending_transactions
+                tx
+                for tx in self.pending_transactions
                 if (current_time - tx.timestamp).total_seconds() < max_age_minutes * 60
             ]
-            self.metrics['pending_count'] = len(self.pending_transactions)
-            
+            self.metrics["pending_count"] = len(self.pending_transactions)
+
         except Exception as e:
             logger.error(f"Failed to prune transactions: {str(e)}")
 
@@ -4262,15 +4401,15 @@ class Shard:
         """Get comprehensive shard metrics."""
         try:
             return {
-                'shard_id': self.shard_id,
-                'height': self.height,
-                'pending_transactions': len(self.pending_transactions),
-                'last_block_time': self.last_block_time.isoformat(),
-                'chain_size': len(self.chain),
-                'total_transactions_in_chain': sum(
+                "shard_id": self.shard_id,
+                "height": self.height,
+                "pending_transactions": len(self.pending_transactions),
+                "last_block_time": self.last_block_time.isoformat(),
+                "chain_size": len(self.chain),
+                "total_transactions_in_chain": sum(
                     len(block.transactions) for block in self.chain
                 ),
-                **self.metrics
+                **self.metrics,
             }
         except Exception as e:
             logger.error(f"Failed to get metrics: {str(e)}")
@@ -4280,56 +4419,59 @@ class Shard:
         """Convert shard state to dictionary."""
         try:
             return {
-                'shard_id': self.shard_id,
-                'height': self.height,
-                'chain': [block.to_dict() for block in self.chain],
-                'pending_transactions': [
+                "shard_id": self.shard_id,
+                "height": self.height,
+                "chain": [block.to_dict() for block in self.chain],
+                "pending_transactions": [
                     tx.to_dict() for tx in self.pending_transactions
                 ],
-                'max_transactions_per_block': self.max_transactions_per_block,
-                'last_block_time': self.last_block_time.isoformat(),
-                'state': self.state,
-                'metrics': self.metrics
+                "max_transactions_per_block": self.max_transactions_per_block,
+                "last_block_time": self.last_block_time.isoformat(),
+                "state": self.state,
+                "metrics": self.metrics,
             }
         except Exception as e:
             logger.error(f"Failed to convert shard to dictionary: {str(e)}")
             return {}
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'Shard':
+    def from_dict(cls, data: Dict) -> "Shard":
         """Create shard from dictionary."""
         try:
             shard = cls(
-                shard_id=data['shard_id'],
-                max_transactions_per_block=data['max_transactions_per_block']
+                shard_id=data["shard_id"],
+                max_transactions_per_block=data["max_transactions_per_block"],
             )
-            
+
             # Restore chain
-            shard.chain = [Block.from_dict(block) for block in data['chain']]
-            
+            shard.chain = [Block.from_dict(block) for block in data["chain"]]
+
             # Restore pending transactions
             shard.pending_transactions = [
-                Transaction.from_dict(tx) for tx in data['pending_transactions']
+                Transaction.from_dict(tx) for tx in data["pending_transactions"]
             ]
-            
+
             # Restore other attributes
-            shard.height = data['height']
-            shard.last_block_time = datetime.fromisoformat(data['last_block_time'])
-            shard.state = data['state']
-            shard.metrics = data['metrics']
-            
+            shard.height = data["height"]
+            shard.last_block_time = datetime.fromisoformat(data["last_block_time"])
+            shard.state = data["state"]
+            shard.metrics = data["metrics"]
+
             return shard
-            
+
         except Exception as e:
             logger.error(f"Failed to create shard from dictionary: {str(e)}")
             raise ValueError("Invalid shard data")
 
     def __str__(self) -> str:
         """Return a human-readable string representation of the shard."""
-        return (f"Shard(id={self.shard_id}, "
-                f"height={self.height}, "
-                f"pending_tx={len(self.pending_transactions)}, "
-                f"blocks={len(self.chain)})")
+        return (
+            f"Shard(id={self.shard_id}, "
+            f"height={self.height}, "
+            f"pending_tx={len(self.pending_transactions)}, "
+            f"blocks={len(self.chain)})"
+        )
+
 
 # ==================== /home/matt/icn-prototype/blockchain/core/blockchain.py ====================
 
@@ -4351,15 +4493,16 @@ from .smart_contract import SmartContract, ContractExecutionError
 
 logger = logging.getLogger(__name__)
 
+
 class ContractExecutor:
     """
     Manages smart contract deployment, execution, and lifecycle.
-    
+
     This class handles the secure deployment of contracts, manages their
     dependencies, and coordinates their execution while enforcing
     resource limits and security constraints.
     """
-    
+
     def __init__(self, initial_mana: int = 1000, mana_regen_rate: int = 10):
         self.contracts: Dict[str, SmartContract] = {}
         self.mana_pool = initial_mana
@@ -4368,21 +4511,21 @@ class ContractExecutor:
         self.max_queue_size = 1000
         self.dependency_graph: Dict[str, Set[str]] = {}
         self.metrics: Dict = {
-            'total_executions': 0,
-            'failed_executions': 0,
-            'total_mana_consumed': 0,
-            'average_execution_time': 0,
-            'contracts_deployed': 0
+            "total_executions": 0,
+            "failed_executions": 0,
+            "total_mana_consumed": 0,
+            "average_execution_time": 0,
+            "contracts_deployed": 0,
         }
         self.execution_lock = asyncio.Lock()
 
     async def deploy_contract(self, contract: SmartContract) -> bool:
         """
         Deploy a new smart contract.
-        
+
         Args:
             contract: SmartContract instance to deploy
-            
+
         Returns:
             bool: True if deployment successful, False otherwise
         """
@@ -4391,42 +4534,43 @@ class ContractExecutor:
             if contract.contract_id in self.contracts:
                 logger.error(f"Contract {contract.contract_id} already exists")
                 return False
-            
+
             # Validate contract code (basic safety checks)
             if not self._validate_contract_code(contract.code):
                 return False
-            
+
             # Check dependencies
             if not self._validate_dependencies(contract.dependencies):
                 return False
-            
+
             # Update dependency graph
             self.dependency_graph[contract.contract_id] = contract.dependencies
-            
+
             # Store contract
             self.contracts[contract.contract_id] = contract
-            self.metrics['contracts_deployed'] += 1
-            
+            self.metrics["contracts_deployed"] += 1
+
             logger.info(f"Deployed contract {contract.contract_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Contract deployment failed: {str(e)}")
             return False
 
-    async def execute_contract(self, contract_id: str, input_data: Dict,
-                             caller: str) -> Dict:
+    async def execute_contract(
+        self, contract_id: str, input_data: Dict, caller: str
+    ) -> Dict:
         """
         Execute a smart contract.
-        
+
         Args:
             contract_id: ID of contract to execute
             input_data: Input data for contract execution
             caller: ID of the calling entity
-            
+
         Returns:
             Dict containing execution results
-            
+
         Raises:
             ContractExecutionError: If execution fails
         """
@@ -4436,29 +4580,29 @@ class ContractExecutor:
                 contract = self.contracts.get(contract_id)
                 if not contract:
                     raise ContractExecutionError(f"Contract {contract_id} not found")
-                
+
                 # Validate caller
                 if caller not in contract.allowed_callers:
                     raise ContractExecutionError("Caller not authorized")
-                
+
                 # Check mana availability
                 if self.mana_pool < contract.mana_cost:
                     raise ContractExecutionError("Insufficient mana in pool")
-                
+
                 # Execute contract
                 execution_start = datetime.now()
                 result = contract.execute(input_data, self.mana_pool)
-                
+
                 # Update mana pool
-                self.mana_pool -= result['mana_used']
-                self.metrics['total_mana_consumed'] += result['mana_used']
-                
+                self.mana_pool -= result["mana_used"]
+                self.metrics["total_mana_consumed"] += result["mana_used"]
+
                 # Update metrics
                 execution_time = (datetime.now() - execution_start).total_seconds()
                 self._update_metrics(execution_time, True)
-                
+
                 return result
-                
+
             except Exception as e:
                 self._update_metrics(0, False)
                 raise ContractExecutionError(str(e))
@@ -4467,26 +4611,26 @@ class ContractExecutor:
         """Validate contract code for basic safety."""
         try:
             # Check for dangerous imports
-            dangerous_imports = ['os', 'sys', 'subprocess', 'importlib']
+            dangerous_imports = ["os", "sys", "subprocess", "importlib"]
             for imp in dangerous_imports:
                 if f"import {imp}" in code or f"from {imp}" in code:
                     logger.error(f"Dangerous import detected: {imp}")
                     return False
-            
+
             # Check for dangerous built-ins
-            dangerous_builtins = ['exec', 'eval', 'open', '__import__']
+            dangerous_builtins = ["exec", "eval", "open", "__import__"]
             for builtin in dangerous_builtins:
                 if builtin in code:
                     logger.error(f"Dangerous builtin detected: {builtin}")
                     # blockchain/contracts/contract_executor.py (continued)
 
                     return False
-            
+
             # Validate code compiles
-            compile(code, '<string>', 'exec')
-            
+            compile(code, "<string>", "exec")
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Contract code validation failed: {str(e)}")
             return False
@@ -4499,36 +4643,38 @@ class ContractExecutor:
                 if dep not in self.contracts:
                     logger.error(f"Dependency not found: {dep}")
                     return False
-            
+
             # Check for circular dependencies
             visited = set()
             path = []
-            
+
             def check_cycle(contract_id: str) -> bool:
                 if contract_id in path:
-                    logger.error(f"Circular dependency detected: {' -> '.join(path + [contract_id])}")
+                    logger.error(
+                        f"Circular dependency detected: {' -> '.join(path + [contract_id])}"
+                    )
                     return False
-                
+
                 if contract_id in visited:
                     return True
-                
+
                 visited.add(contract_id)
                 path.append(contract_id)
-                
+
                 for dep in self.dependency_graph.get(contract_id, set()):
                     if not check_cycle(dep):
                         return False
-                
+
                 path.pop()
                 return True
-            
+
             # Check each dependency
             for dep in dependencies:
                 if not check_cycle(dep):
                     return False
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Dependency validation failed: {str(e)}")
             return False
@@ -4536,18 +4682,19 @@ class ContractExecutor:
     def _update_metrics(self, execution_time: float, success: bool) -> None:
         """Update executor metrics after contract execution."""
         try:
-            self.metrics['total_executions'] += 1
-            
+            self.metrics["total_executions"] += 1
+
             if not success:
-                self.metrics['failed_executions'] += 1
-            
+                self.metrics["failed_executions"] += 1
+
             # Update average execution time
-            total_time = (self.metrics['average_execution_time'] * 
-                         (self.metrics['total_executions'] - 1))
-            self.metrics['average_execution_time'] = (
-                (total_time + execution_time) / self.metrics['total_executions']
+            total_time = self.metrics["average_execution_time"] * (
+                self.metrics["total_executions"] - 1
             )
-            
+            self.metrics["average_execution_time"] = (
+                total_time + execution_time
+            ) / self.metrics["total_executions"]
+
         except Exception as e:
             logger.error(f"Failed to update metrics: {str(e)}")
 
@@ -4556,10 +4703,10 @@ class ContractExecutor:
         try:
             old_mana = self.mana_pool
             self.mana_pool = min(1000, self.mana_pool + self.mana_regen_rate)
-            
+
             if self.mana_pool > old_mana:
                 logger.debug(f"Regenerated mana: {self.mana_pool - old_mana}")
-                
+
         except Exception as e:
             logger.error(f"Mana regeneration failed: {str(e)}")
 
@@ -4570,41 +4717,42 @@ class ContractExecutor:
                 if not self.execution_queue:
                     await asyncio.sleep(1)
                     continue
-                
+
                 # Get next execution request
                 request = self.execution_queue.pop(0)
-                
+
                 # Execute contract
                 await self.execute_contract(
-                    request['contract_id'],
-                    request['input_data'],
-                    request['caller']
+                    request["contract_id"], request["input_data"], request["caller"]
                 )
-                
+
                 # Regenerate some mana
                 await self.regenerate_mana()
-                
+
             except Exception as e:
                 logger.error(f"Queue processing error: {str(e)}")
                 await asyncio.sleep(1)
 
-    async def queue_execution(self, contract_id: str, input_data: Dict,
-                            caller: str) -> bool:
+    async def queue_execution(
+        self, contract_id: str, input_data: Dict, caller: str
+    ) -> bool:
         """Queue a contract for execution."""
         try:
             if len(self.execution_queue) >= self.max_queue_size:
                 logger.error("Execution queue full")
                 return False
-            
-            self.execution_queue.append({
-                'contract_id': contract_id,
-                'input_data': input_data,
-                'caller': caller,
-                'timestamp': datetime.now()
-            })
-            
+
+            self.execution_queue.append(
+                {
+                    "contract_id": contract_id,
+                    "input_data": input_data,
+                    "caller": caller,
+                    "timestamp": datetime.now(),
+                }
+            )
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to queue execution: {str(e)}")
             return False
@@ -4617,11 +4765,11 @@ class ContractExecutor:
         """Get list of all deployed contracts."""
         return [
             {
-                'contract_id': contract.contract_id,
-                'creator': contract.creator,
-                'version': contract.version,
-                'dependencies': list(contract.dependencies),
-                'metrics': contract.get_metrics()
+                "contract_id": contract.contract_id,
+                "creator": contract.creator,
+                "version": contract.version,
+                "dependencies": list(contract.dependencies),
+                "metrics": contract.get_metrics(),
             }
             for contract in self.contracts.values()
         ]
@@ -4630,9 +4778,9 @@ class ContractExecutor:
         """Get executor metrics."""
         return {
             **self.metrics,
-            'current_mana': self.mana_pool,
-            'queue_length': len(self.execution_queue),
-            'active_contracts': len(self.contracts)
+            "current_mana": self.mana_pool,
+            "queue_length": len(self.execution_queue),
+            "active_contracts": len(self.contracts),
         }
 
     async def start(self) -> None:
@@ -4649,9 +4797,12 @@ class ContractExecutor:
 
     def __str__(self) -> str:
         """Return a human-readable string representation of the executor."""
-        return (f"ContractExecutor(contracts={len(self.contracts)}, "
-                f"mana={self.mana_pool}, "
-                f"queue={len(self.execution_queue)})")
+        return (
+            f"ContractExecutor(contracts={len(self.contracts)}, "
+            f"mana={self.mana_pool}, "
+            f"queue={len(self.execution_queue)})"
+        )
+
 
 # ==================== /home/matt/icn-prototype/blockchain/contracts/smart_contract.py ====================
 
@@ -4669,21 +4820,30 @@ from io import StringIO
 
 logger = logging.getLogger(__name__)
 
+
 class ContractExecutionError(Exception):
     """Custom exception for contract execution errors."""
+
     pass
+
 
 class SmartContract:
     """
     Represents a smart contract in the ICN blockchain.
-    
+
     Smart contracts are self-executing contracts with terms directly
-    written into code. They run in a sandboxed environment with 
+    written into code. They run in a sandboxed environment with
     restricted capabilities for security.
     """
-    
-    def __init__(self, contract_id: str, code: str, creator: str, 
-                 mana_cost: int = 10, version: str = "1.0"):
+
+    def __init__(
+        self,
+        contract_id: str,
+        code: str,
+        creator: str,
+        mana_cost: int = 10,
+        version: str = "1.0",
+    ):
         self.contract_id = contract_id
         self.code = code
         self.creator = creator
@@ -4696,19 +4856,19 @@ class SmartContract:
         self.total_mana_consumed = 0
         self.execution_history: List[Dict] = []
         self.metadata: Dict = {
-            'created_at': self.created_at,
-            'version': version,
-            'creator': creator,
-            'description': '',
-            'tags': set()
+            "created_at": self.created_at,
+            "version": version,
+            "creator": creator,
+            "description": "",
+            "tags": set(),
         }
         self.dependencies: Set[str] = set()
         self.allowed_callers: Set[str] = {creator}
         self.restrictions: Dict = {
-            'max_state_size': 1024 * 1024,  # 1MB
-            'max_execution_time': 5,  # seconds
-            'max_mana_per_execution': 100,
-            'max_daily_executions': 1000
+            "max_state_size": 1024 * 1024,  # 1MB
+            "max_execution_time": 5,  # seconds
+            "max_mana_per_execution": 100,
+            "max_daily_executions": 1000,
         }
         self.daily_executions = 0
         self.last_reset = datetime.now()
@@ -4716,25 +4876,25 @@ class SmartContract:
     def execute(self, input_data: Dict, available_mana: int) -> Dict:
         """
         Execute the smart contract code with safety checks.
-        
+
         Args:
             input_data: Data passed to the contract
             available_mana: Available mana for execution
-            
+
         Returns:
             Dict containing execution results and new state
-            
+
         Raises:
             ContractExecutionError: If execution fails or violates restrictions
         """
         # Reset daily execution counter if needed
         self._reset_daily_executions()
-        
+
         # Validate execution conditions
         validation_result = self._validate_execution(input_data, available_mana)
         if validation_result.get("error"):
             raise ContractExecutionError(validation_result["error"])
-            
+
         execution_start = time.time()
         stdout_capture = StringIO()
         original_stdout = sys.stdout
@@ -4743,59 +4903,59 @@ class SmartContract:
         try:
             # Set up secure execution environment
             local_namespace = self._setup_execution_environment(input_data)
-            
+
             # Execute contract code
             exec(self.code, {}, local_namespace)
-            
+
             # Validate execution result
             if "execute" not in local_namespace:
                 raise ContractExecutionError("Contract missing execute function")
-                
+
             # Check execution time
-            if time.time() - execution_start > self.restrictions['max_execution_time']:
+            if time.time() - execution_start > self.restrictions["max_execution_time"]:
                 raise ContractExecutionError("Execution time limit exceeded")
-                
+
             # Execute contract function
             result = local_namespace["execute"](input_data, self.state)
-            
+
             # Update contract metrics
             self._update_execution_metrics(execution_start)
-            
+
             # Capture any output
             output = stdout_capture.getvalue()
-            
+
             return {
                 "state": self.state,
                 "result": result,
                 "mana_used": self.mana_cost,
                 "execution_time": time.time() - execution_start,
-                "output": output
+                "output": output,
             }
-            
+
         except Exception as e:
             logger.error(f"Contract execution failed: {str(e)}")
             raise ContractExecutionError(str(e))
-            
+
         finally:
             sys.stdout = original_stdout
 
     def _validate_execution(self, input_data: Dict, available_mana: int) -> Dict:
         """Validate execution conditions."""
         try:
-            if self.daily_executions >= self.restrictions['max_daily_executions']:
+            if self.daily_executions >= self.restrictions["max_daily_executions"]:
                 return {"error": "Daily execution limit exceeded"}
-                
+
             if available_mana < self.mana_cost:
                 return {"error": "Insufficient mana"}
-                
-            if len(str(self.state)) > self.restrictions['max_state_size']:
+
+            if len(str(self.state)) > self.restrictions["max_state_size"]:
                 return {"error": "State size limit exceeded"}
-                
+
             if not isinstance(input_data, dict):
                 return {"error": "Invalid input data format"}
-                
+
             return {}
-            
+
         except Exception as e:
             return {"error": f"Validation failed: {str(e)}"}
 
@@ -4803,21 +4963,21 @@ class SmartContract:
         """Set up secure execution environment with allowed variables."""
         # Basic built-ins that are safe to use
         safe_builtins = {
-            'abs': abs,
-            'bool': bool,
-            'dict': dict,
-            'float': float,
-            'int': int,
-            'len': len,
-            'list': list,
-            'max': max,
-            'min': min,
-            'round': round,
-            'sorted': sorted,
-            'str': str,
-            'sum': sum
+            "abs": abs,
+            "bool": bool,
+            "dict": dict,
+            "float": float,
+            "int": int,
+            "len": len,
+            "list": list,
+            "max": max,
+            "min": min,
+            "round": round,
+            "sorted": sorted,
+            "str": str,
+            "sum": sum,
         }
-        
+
         return {
             "input": input_data,
             "state": self.state.copy(),
@@ -4825,7 +4985,7 @@ class SmartContract:
             "creator": self.creator,
             "version": self.version,
             "metadata": self.metadata,
-            "__builtins__": safe_builtins
+            "__builtins__": safe_builtins,
         }
 
     def _update_execution_metrics(self, execution_start: float) -> None:
@@ -4834,14 +4994,14 @@ class SmartContract:
         self.execution_count += 1
         self.daily_executions += 1
         self.total_mana_consumed += self.mana_cost
-        
+
         execution_record = {
-            'timestamp': self.last_executed,
-            'execution_time': time.time() - execution_start,
-            'mana_used': self.mana_cost,
-            'state_size': len(str(self.state))
+            "timestamp": self.last_executed,
+            "execution_time": time.time() - execution_start,
+            "mana_used": self.mana_cost,
+            "state_size": len(str(self.state)),
         }
-        
+
         self.execution_history.append(execution_record)
         if len(self.execution_history) > 1000:
             self.execution_history = self.execution_history[-1000:]
@@ -4871,11 +5031,11 @@ class SmartContract:
             # Validate new restrictions
             if not all(k in self.restrictions for k in new_restrictions):
                 return False
-                
+
             # Update only valid restrictions
             self.restrictions.update(new_restrictions)
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to update restrictions: {str(e)}")
             return False
@@ -4883,73 +5043,79 @@ class SmartContract:
     def get_metrics(self) -> Dict:
         """Get comprehensive contract metrics."""
         return {
-            'contract_id': self.contract_id,
-            'version': self.version,
-            'creator': self.creator,
-            'created_at': self.created_at.isoformat(),
-            'last_executed': self.last_executed.isoformat() if self.last_executed else None,
-            'execution_count': self.execution_count,
-            'daily_executions': self.daily_executions,
-            'total_mana_consumed': self.total_mana_consumed,
-            'average_mana_per_execution': (
-                self.total_mana_consumed / self.execution_count 
-                if self.execution_count > 0 else 0
+            "contract_id": self.contract_id,
+            "version": self.version,
+            "creator": self.creator,
+            "created_at": self.created_at.isoformat(),
+            "last_executed": (
+                self.last_executed.isoformat() if self.last_executed else None
             ),
-            'state_size': len(str(self.state)),
-            'dependencies': list(self.dependencies),
-            'authorized_callers': len(self.allowed_callers),
-            'restrictions': self.restrictions
+            "execution_count": self.execution_count,
+            "daily_executions": self.daily_executions,
+            "total_mana_consumed": self.total_mana_consumed,
+            "average_mana_per_execution": (
+                self.total_mana_consumed / self.execution_count
+                if self.execution_count > 0
+                else 0
+            ),
+            "state_size": len(str(self.state)),
+            "dependencies": list(self.dependencies),
+            "authorized_callers": len(self.allowed_callers),
+            "restrictions": self.restrictions,
         }
 
     def to_dict(self) -> Dict:
         """Convert contract to dictionary format."""
         return {
-            'contract_id': self.contract_id,
-            'code': self.code,
-            'creator': self.creator,
-            'state': self.state,
-            'mana_cost': self.mana_cost,
-            'version': self.version,
-            'metadata': {
+            "contract_id": self.contract_id,
+            "code": self.code,
+            "creator": self.creator,
+            "state": self.state,
+            "mana_cost": self.mana_cost,
+            "version": self.version,
+            "metadata": {
                 **self.metadata,
-                'created_at': self.metadata['created_at'].isoformat(),
-                'tags': list(self.metadata['tags'])
+                "created_at": self.metadata["created_at"].isoformat(),
+                "tags": list(self.metadata["tags"]),
             },
-            'dependencies': list(self.dependencies),
-            'allowed_callers': list(self.allowed_callers),
-            'restrictions': self.restrictions,
-            'metrics': self.get_metrics()
+            "dependencies": list(self.dependencies),
+            "allowed_callers": list(self.allowed_callers),
+            "restrictions": self.restrictions,
+            "metrics": self.get_metrics(),
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'SmartContract':
+    def from_dict(cls, data: Dict) -> "SmartContract":
         """Create contract from dictionary."""
         contract = cls(
-            contract_id=data['contract_id'],
-            code=data['code'],
-            creator=data['creator'],
-            mana_cost=data['mana_cost'],
-            version=data['version']
+            contract_id=data["contract_id"],
+            code=data["code"],
+            creator=data["creator"],
+            mana_cost=data["mana_cost"],
+            version=data["version"],
         )
-        
-        contract.state = data['state']
+
+        contract.state = data["state"]
         contract.metadata = {
-            **data['metadata'],
-            'created_at': datetime.fromisoformat(data['metadata']['created_at']),
-            'tags': set(data['metadata']['tags'])
+            **data["metadata"],
+            "created_at": datetime.fromisoformat(data["metadata"]["created_at"]),
+            "tags": set(data["metadata"]["tags"]),
         }
-        contract.dependencies = set(data['dependencies'])
-        contract.allowed_callers = set(data['allowed_callers'])
-        contract.restrictions = data['restrictions']
-        
+        contract.dependencies = set(data["dependencies"])
+        contract.allowed_callers = set(data["allowed_callers"])
+        contract.restrictions = data["restrictions"]
+
         return contract
 
     def __str__(self) -> str:
         """Return a human-readable string representation of the contract."""
-        return (f"Contract(id={self.contract_id}, "
-                f"creator={self.creator}, "
-                f"executions={self.execution_count}, "
-                f"mana_cost={self.mana_cost})")
+        return (
+            f"Contract(id={self.contract_id}, "
+            f"creator={self.creator}, "
+            f"executions={self.execution_count}, "
+            f"mana_cost={self.mana_cost})"
+        )
+
 
 # ==================== /home/matt/icn-prototype/blockchain/contracts/__init__.py ====================
 
@@ -4970,49 +5136,52 @@ from ..core.block import Block
 
 logger = logging.getLogger(__name__)
 
+
 class ProofOfCooperation:
     """
     Implements the Proof of Cooperation consensus mechanism.
-    
+
     This consensus mechanism prioritizes cooperative behavior and community
     contribution over computational power or stake. It uses reputation scores,
     diversity of cooperation, and historical performance to select validators.
     """
-    
+
     def __init__(self, min_reputation: float = 10.0, cooldown_blocks: int = 3):
         self.min_reputation = min_reputation
         self.cooldown_blocks = cooldown_blocks
         self.cooperation_scores: Dict[str, float] = {}
         self.reputation_weights = {
-            'cooperative_growth': 1.5,    # Cooperative development and expansion
-            'proposal_participation': 1.2, # Governance participation
-            'transaction_validation': 1.0, # Basic validation work
-            'resource_sharing': 1.3,      # Contributing resources
-            'conflict_resolution': 1.1,   # Helping resolve disputes
-            'community_building': 1.4,    # Community engagement
-            'sustainability': 1.2,        # Long-term contribution
-            'innovation': 1.3,            # New features/improvements
-            'network_stability': 1.1,     # Reliable operation
-            'data_availability': 1.2      # Data provision
+            "cooperative_growth": 1.5,  # Cooperative development and expansion
+            "proposal_participation": 1.2,  # Governance participation
+            "transaction_validation": 1.0,  # Basic validation work
+            "resource_sharing": 1.3,  # Contributing resources
+            "conflict_resolution": 1.1,  # Helping resolve disputes
+            "community_building": 1.4,  # Community engagement
+            "sustainability": 1.2,  # Long-term contribution
+            "innovation": 1.3,  # New features/improvements
+            "network_stability": 1.1,  # Reliable operation
+            "data_availability": 1.2,  # Data provision
         }
         self.validation_thresholds = {
-            'min_participation': 0.1,     # Minimum participation rate
-            'min_success_rate': 0.8,      # Minimum validation success rate
-            'min_availability': 0.95,     # Minimum node availability
-            'max_consecutive_validations': 3  # Max blocks in a row
+            "min_participation": 0.1,  # Minimum participation rate
+            "min_success_rate": 0.8,  # Minimum validation success rate
+            "min_availability": 0.95,  # Minimum node availability
+            "max_consecutive_validations": 3,  # Max blocks in a row
         }
         self.reputation_decay_factor = 0.99  # Daily reputation decay
-        self.collusion_threshold = 0.8    # Threshold for detecting collusion
+        self.collusion_threshold = 0.8  # Threshold for detecting collusion
         self.validator_history: List[Tuple[str, datetime, int]] = []
         self.validation_stats: Dict[str, Dict] = {}
         self.performance_metrics: Dict[str, float] = {
-            'average_block_time': 0.0,
-            'total_validations': 0,
-            'successful_validations': 0,
-            'collusion_detections': 0
+            "average_block_time": 0.0,
+            "total_validations": 0,
+            "successful_validations": 0,
+            "collusion_detections": 0,
         }
 
-    def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
+    def calculate_cooperation_score(
+        self, node: Node, shard_id: Optional[int] = None
+    ) -> float:
         """Calculate a node's cooperation score based on multiple factors."""
         if not node.can_validate(shard_id):
             return 0.0
@@ -5023,19 +5192,26 @@ class ProofOfCooperation:
                 score * self.reputation_weights.get(category, 1.0)
                 for category, score in node.reputation_scores.items()
             )
-            
+
             # Apply modifiers
             diversity_factor = self._calculate_diversity_factor(node)
             consistency_factor = self._calculate_consistency_factor(node)
             performance_factor = self._calculate_performance_factor(node)
-            shard_factor = self._calculate_shard_factor(node, shard_id) if shard_id else 1.0
-            
+            shard_factor = (
+                self._calculate_shard_factor(node, shard_id) if shard_id else 1.0
+            )
+
             # Combine factors
-            final_score = (base_score * diversity_factor * consistency_factor * 
-                         performance_factor * shard_factor)
-                         
+            final_score = (
+                base_score
+                * diversity_factor
+                * consistency_factor
+                * performance_factor
+                * shard_factor
+            )
+
             return max(0, final_score)
-            
+
         except Exception as e:
             logger.error(f"Failed to calculate cooperation score: {str(e)}")
             return 0.0
@@ -5046,35 +5222,40 @@ class ProofOfCooperation:
             recent_interactions = node.cooperative_interactions[-100:]
             if not recent_interactions:
                 return 1.0
-                
+
             unique_coops = len(set(recent_interactions))
             total_interactions = len(recent_interactions)
-            
+
             diversity_score = unique_coops / total_interactions
             normalized_score = 1.0 + math.log(diversity_score + 1)
-            
-            return max(self.validation_thresholds['min_participation'], normalized_score)
-            
+
+            return max(
+                self.validation_thresholds["min_participation"], normalized_score
+            )
+
         except Exception as e:
             logger.error(f"Failed to calculate diversity factor: {str(e)}")
-            return self.validation_thresholds['min_participation']
+            return self.validation_thresholds["min_participation"]
 
     def _calculate_consistency_factor(self, node: Node) -> float:
         """Calculate consistency factor based on validation history."""
         try:
             if not node.validation_history:
                 return 1.0
-                
+
             recent_validations = node.validation_history[-50:]
-            successful = sum(1 for v in recent_validations 
-                           if v.get('evidence', {}).get('success', False))
-            
+            successful = sum(
+                1
+                for v in recent_validations
+                if v.get("evidence", {}).get("success", False)
+            )
+
             success_rate = successful / len(recent_validations)
-            return max(self.validation_thresholds['min_success_rate'], success_rate)
-            
+            return max(self.validation_thresholds["min_success_rate"], success_rate)
+
         except Exception as e:
             logger.error(f"Failed to calculate consistency factor: {str(e)}")
-            return self.validation_thresholds['min_success_rate']
+            return self.validation_thresholds["min_success_rate"]
 
     def _calculate_performance_factor(self, node: Node) -> float:
         """Calculate performance factor based on node metrics."""
@@ -5084,54 +5265,56 @@ class ProofOfCooperation:
                 return 1.0
 
             factors = [
-                metrics.get('availability', 0) / 100,
-                metrics.get('validation_success_rate', 0) / 100,
-                metrics.get('network_reliability', 0) / 100
+                metrics.get("availability", 0) / 100,
+                metrics.get("validation_success_rate", 0) / 100,
+                metrics.get("network_reliability", 0) / 100,
             ]
-            
+
             avg_performance = sum(factors) / len(factors)
-            return max(self.validation_thresholds['min_availability'], avg_performance)
-            
+            return max(self.validation_thresholds["min_availability"], avg_performance)
+
         except Exception as e:
             logger.error(f"Failed to calculate performance factor: {str(e)}")
-            return self.validation_thresholds['min_availability']
+            return self.validation_thresholds["min_availability"]
 
     def _calculate_shard_factor(self, node: Node, shard_id: int) -> float:
         """Calculate shard-specific performance factor."""
         try:
             if shard_id not in node.active_shards:
                 return 0.0
-                
+
             # Consider time spent in shard
-            time_in_shard = (datetime.now() - 
-                           node.active_shards[shard_id]).total_seconds()
+            time_in_shard = (
+                datetime.now() - node.active_shards[shard_id]
+            ).total_seconds()
             shard_experience = min(1.0, time_in_shard / (24 * 3600))
-            
+
             return 0.5 + (0.5 * shard_experience)
-            
+
         except Exception as e:
             logger.error(f"Failed to calculate shard factor: {str(e)}")
             return 0.0
 
-    def select_validator(self, nodes: List[Node], shard_id: Optional[int] = None) -> Optional[Node]:
+    def select_validator(
+        self, nodes: List[Node], shard_id: Optional[int] = None
+    ) -> Optional[Node]:
         """Select the next validator using weighted random selection."""
         try:
             eligible_nodes = [
-                node for node in nodes 
-                if self._is_eligible_validator(node, shard_id)
+                node for node in nodes if self._is_eligible_validator(node, shard_id)
             ]
-            
+
             if not eligible_nodes:
                 logger.warning("No eligible validators available")
                 return None
-                
+
             # Calculate scores for eligible nodes
             scores = [
-                self.calculate_cooperation_score(node, shard_id) 
+                self.calculate_cooperation_score(node, shard_id)
                 for node in eligible_nodes
             ]
             total_score = sum(scores)
-            
+
             if total_score <= 0:
                 logger.warning("No nodes with positive cooperation scores")
                 selected = random.choice(eligible_nodes)
@@ -5140,48 +5323,52 @@ class ProofOfCooperation:
                 selection_point = random.uniform(0, total_score)
                 current_sum = 0
                 selected = eligible_nodes[-1]
-                
+
                 for node, score in zip(eligible_nodes, scores):
                     current_sum += score
                     if current_sum >= selection_point:
                         selected = node
                         break
-            
+
             # Record selection and apply cooldown
             self._record_validator_selection(selected, shard_id)
             selected.enter_cooldown(self.cooldown_blocks)
-            
+
             return selected
-            
+
         except Exception as e:
             logger.error(f"Failed to select validator: {str(e)}")
             return None
 
-    def _is_eligible_validator(self, node: Node, shard_id: Optional[int] = None) -> bool:
+    def _is_eligible_validator(
+        self, node: Node, shard_id: Optional[int] = None
+    ) -> bool:
         """Check if a node is eligible to validate blocks."""
         try:
             if not node.can_validate(shard_id):
                 return False
-                
+
             # Check minimum reputation requirement
             if node.get_total_reputation() < self.min_reputation:
                 return False
-                
+
             # Check performance factors
             performance_factor = self._calculate_performance_factor(node)
-            if performance_factor < self.validation_thresholds['min_availability']:
+            if performance_factor < self.validation_thresholds["min_availability"]:
                 return False
-                
+
             # Check recent selections to prevent concentration
             recent_validations = [
-                v[0] for v in self.validator_history[-10:]
-                if v[0] == node.node_id
+                v[0] for v in self.validator_history[-10:] if v[0] == node.node_id
             ]
-            if len(recent_validations) >= self.validation_thresholds['max_consecutive_validations']:
+            if (
+                len(recent_validations)
+                >= self.validation_thresholds["max_consecutive_validations"]
+            ):
                 return False
-                
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to check validator eligibility: {str(e)}")
             return False
@@ -5192,76 +5379,75 @@ class ProofOfCooperation:
             self.validator_history.append((node.node_id, datetime.now(), shard_id))
             if len(self.validator_history) > 1000:
                 self.validator_history = self.validator_history[-1000:]
-                
+
             if node.node_id not in self.validation_stats:
                 self.validation_stats[node.node_id] = {
-                    'selections': 0,
-                    'successful_validations': 0,
-                    'last_selected': None,
-                    'shard_validations': {}
+                    "selections": 0,
+                    "successful_validations": 0,
+                    "last_selected": None,
+                    "shard_validations": {},
                 }
-                
+
             stats = self.validation_stats[node.node_id]
-            stats['selections'] += 1
-            stats['last_selected'] = datetime.now()
-            
+            stats["selections"] += 1
+            stats["last_selected"] = datetime.now()
+
             if shard_id is not None:
-                shard_stats = stats['shard_validations'].setdefault(shard_id, {
-                    'selections': 0,
-                    'successful': 0
-                })
-                shard_stats['selections'] += 1
-                
+                shard_stats = stats["shard_validations"].setdefault(
+                    shard_id, {"selections": 0, "successful": 0}
+                )
+                shard_stats["selections"] += 1
+
         except Exception as e:
             logger.error(f"Failed to record validator selection: {str(e)}")
 
-    def validate_block(self, block: Block, previous_block: Optional[Block],
-                      validator: Node) -> bool:
+    def validate_block(
+        self, block: Block, previous_block: Optional[Block], validator: Node
+    ) -> bool:
         """Validate a proposed block."""
         try:
             # Verify validator eligibility
             if not self._is_eligible_validator(validator, block.shard_id):
                 logger.error("Validator not eligible")
                 return False
-                
+
             # Perform block validation
             if not block.validate(previous_block):
                 logger.error("Block validation failed")
                 return False
-                
+
             # Update statistics
             self._update_validation_stats(validator, block, True)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Block validation failed: {str(e)}")
             self._update_validation_stats(validator, block, False)
             return False
 
-    def _update_validation_stats(self, validator: Node, block: Block,
-                               success: bool) -> None:
+    def _update_validation_stats(
+        self, validator: Node, block: Block, success: bool
+    ) -> None:
         """Update validation statistics."""
         try:
-            stats = self.validation_stats.get(validator.node_id, {
-                'selections': 0,
-                'successful_validations': 0,
-                'shard_validations': {}
-            })
-            
+            stats = self.validation_stats.get(
+                validator.node_id,
+                {"selections": 0, "successful_validations": 0, "shard_validations": {}},
+            )
+
             if success:
-                stats['successful_validations'] += 1
-                
+                stats["successful_validations"] += 1
+
             if block.shard_id is not None:
-                shard_stats = stats['shard_validations'].setdefault(block.shard_id, {
-                    'selections': 0,
-                    'successful': 0
-                })
+                shard_stats = stats["shard_validations"].setdefault(
+                    block.shard_id, {"selections": 0, "successful": 0}
+                )
                 if success:
-                    shard_stats['successful'] += 1
-                    
+                    shard_stats["successful"] += 1
+
             self.validation_stats[validator.node_id] = stats
-            
+
         except Exception as e:
             logger.error(f"Failed to update validation stats: {str(e)}")
 
@@ -5271,7 +5457,7 @@ class ProofOfCooperation:
             # Check for repeated validations with same actors
             recent_validations = validator.validation_history[-20:]
             interaction_counts: Dict[str, int] = {}
-            
+
             for validation in recent_validations:
                 for tx in block.transactions:
                     interaction_counts[tx.sender] = (
@@ -5280,16 +5466,18 @@ class ProofOfCooperation:
                     interaction_counts[tx.receiver] = (
                         interaction_counts.get(tx.receiver, 0) + 1
                     )
-            
+
             # Check if any actor appears too frequently
             max_interactions = max(interaction_counts.values(), default=0)
             if max_interactions / len(recent_validations) > self.collusion_threshold:
-                logger.warning(f"Potential collusion detected for validator {validator.node_id}")
-                self.performance_metrics['collusion_detections'] += 1
+                logger.warning(
+                    f"Potential collusion detected for validator {validator.node_id}"
+                )
+                self.performance_metrics["collusion_detections"] += 1
                 return True
-                
+
             return False
-            
+
         except Exception as e:
             logger.error(f"Failed to detect collusion: {str(e)}")
             return False
@@ -5298,15 +5486,20 @@ class ProofOfCooperation:
         """Get consensus mechanism metrics."""
         try:
             return {
-                'active_validators': len(self.validation_stats),
-                'total_validations': self.performance_metrics['total_validations'],
-                'successful_validations': self.performance_metrics['successful_validations'],
-                'average_block_time': self.performance_metrics['average_block_time'],
-                'collusion_detections': self.performance_metrics['collusion_detections']
+                "active_validators": len(self.validation_stats),
+                "total_validations": self.performance_metrics["total_validations"],
+                "successful_validations": self.performance_metrics[
+                    "successful_validations"
+                ],
+                "average_block_time": self.performance_metrics["average_block_time"],
+                "collusion_detections": self.performance_metrics[
+                    "collusion_detections"
+                ],
             }
         except Exception as e:
             logger.error(f"Failed to get metrics: {str(e)}")
             return {}
+
 
 # ==================== /home/matt/icn-prototype/blockchain/consensus/__init__.py ====================
 

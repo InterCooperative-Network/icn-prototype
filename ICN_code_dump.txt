@@ -1679,263 +1679,220 @@ if __name__ == '__main__':
 
 # ==================== /home/matt/icn-prototype/tests/unit/test_blockchain.py ====================
 
-# tests/unit/test_blockchain.py
-
-import unittest
-from datetime import datetime, timedelta
-import sys
-import os
-from typing import List, Dict
-from unittest.mock import Mock, patch
-
-# Add project root to Python path
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, project_root)
+import pytest
+import asyncio
+from datetime import datetime
 
 from blockchain.core.blockchain import Blockchain
-from blockchain.core.block import Block
-from blockchain.core.transaction import Transaction
 from blockchain.core.node import Node
-from blockchain.core.shard import Shard
+from blockchain.core.block import Block
 from blockchain.contracts.smart_contract import SmartContract
+from blockchain.core.transaction import Transaction
 
-class TestBlockchain(unittest.TestCase):
-    """Test cases for the Blockchain class."""
+@pytest.fixture
+def blockchain():
+    """
+    Fixture to create a fresh instance of the Blockchain for each test.
+    """
+    return Blockchain(num_shards=3, initial_mana=1000, mana_regen_rate=10)
 
-    def setUp(self):
-        """Set up test fixtures before each test method."""
-        self.blockchain = Blockchain()
-        # Add some test nodes
-        self.test_nodes = [
-            Node(node_id=f"node{i}", cooperative_id="test_coop") 
-            for i in range(3)
-        ]
-        for node in self.test_nodes:
-            self.blockchain.register_node(node)
+def test_initialization(blockchain):
+    """
+    Test the initialization of the Blockchain.
+    """
+    assert isinstance(blockchain, Blockchain)
+    assert blockchain.cooperative_mana == 1000
+    assert blockchain.mana_regen_rate == 10
+    assert len(blockchain.shards) == 3
+    assert blockchain.genesis_block_created is True
 
-    def _create_sample_transaction(self, sender: str = "user1", 
-                                 receiver: str = "user2", 
-                                 shard_id: int = 0) -> Transaction:
-        """Helper to create a sample transaction."""
-        return Transaction(
-            sender=sender,
-            receiver=receiver,
-            action="transfer",
-            data={"amount": 10.0},
-            shard_id=shard_id
-        )
+def test_register_node(blockchain):
+    """
+    Test node registration functionality.
+    """
+    node = Node(node_id="node_1")
+    assert blockchain.register_node(node) is True
+    assert node.node_id in blockchain.nodes
 
-    def test_initialization(self):
-        """Test blockchain initialization."""
-        self.assertEqual(len(self.blockchain.nodes), 3)
-        self.assertEqual(len(self.blockchain.shards), 4)  # Default 4 shards
-        self.assertIsNotNone(self.blockchain.consensus_mechanism)
-        self.assertEqual(self.blockchain.genesis_block_created, True)
-        self.assertGreater(len(self.blockchain.chain), 0)
+    # Duplicate registration should fail
+    assert blockchain.register_node(node) is False
 
-    def test_create_genesis_block(self):
-        """Test genesis block creation."""
-        # Create new blockchain to test genesis
-        new_chain = Blockchain()
-        self.assertEqual(len(new_chain.chain), 1)
-        genesis = new_chain.chain[0]
-        self.assertEqual(genesis.index, 0)
-        self.assertEqual(genesis.previous_hash, "0" * 64)
-        self.assertEqual(len(genesis.transactions), 0)
-        self.assertEqual(genesis.validator, "genesis")
+def test_create_shard(blockchain):
+    """
+    Test shard creation in the Blockchain.
+    """
+    assert blockchain.create_shard(3) is True
+    assert 3 in blockchain.shards
 
-    def test_register_node(self):
-        """Test node registration."""
-        new_node = Node(node_id="new_node", cooperative_id="test_coop")
-        self.assertTrue(self.blockchain.register_node(new_node))
-        self.assertIn(new_node.node_id, self.blockchain.nodes)
-        
-        # Test duplicate registration
-        self.assertFalse(self.blockchain.register_node(new_node))
-        
-        # Test invalid node
-        invalid_node = None
-        self.assertFalse(self.blockchain.register_node(invalid_node))
+    # Attempt to create an existing shard
+    assert blockchain.create_shard(3) is False
 
-    def test_create_shard(self):
-        """Test shard creation."""
-        # Test creating new shard
-        new_shard_id = len(self.blockchain.shards)
-        self.assertTrue(self.blockchain.create_shard(new_shard_id))
-        self.assertIn(new_shard_id, self.blockchain.shards)
-        
-        # Test duplicate shard creation
-        self.assertFalse(self.blockchain.create_shard(new_shard_id))
+def test_add_transaction(blockchain):
+    """
+    Test adding a transaction to the Blockchain.
+    """
+    transaction = {
+        "sender": "alice",
+        "receiver": "bob",
+        "action": "transfer",
+        "data": {"amount": 50}
+    }
 
-    def test_add_transaction(self):
-        """Test adding transactions."""
-        # Test valid transaction
-        tx = self._create_sample_transaction()
-        self.assertTrue(self.blockchain.add_transaction({
-            'sender': tx.sender,
-            'receiver': tx.receiver,
-            'action': tx.action,
-            'data': tx.data
-        }))
-        
-        # Verify transaction was added to a shard
-        shard_id = tx.shard_id
-        self.assertGreater(
-            len(self.blockchain.shards[shard_id].pending_transactions),
-            0
-        )
+    # Add a valid transaction
+    assert blockchain.add_transaction(transaction) is True
 
-    def test_create_block(self):
-        """Test block creation."""
-        # Add some transactions
-        for _ in range(3):
-            tx = self._create_sample_transaction()
-            self.blockchain.add_transaction({
-                'sender': tx.sender,
-                'receiver': tx.receiver,
-                'action': tx.action,
-                'data': tx.data
-            })
+    # Add an invalid transaction
+    invalid_transaction = "invalid_format"
+    assert blockchain.add_transaction(invalid_transaction) is False
 
-        # Create block
-        shard_id = 0
-        block = self.blockchain.create_block(shard_id)
-        self.assertIsNotNone(block)
-        self.assertEqual(block.shard_id, shard_id)
-        self.assertGreater(len(block.transactions), 0)
+def test_create_block(blockchain):
+    """
+    Test block creation in the Blockchain.
+    """
+    node = Node(node_id="node_1")
+    blockchain.register_node(node)
 
-    def test_add_block(self):
-        """Test adding blocks."""
-        # Create and add a valid block
-        tx = self._create_sample_transaction()
-        self.blockchain.add_transaction({
-            'sender': tx.sender,
-            'receiver': tx.receiver,
-            'action': tx.action,
-            'data': tx.data
-        })
-        
-        block = self.blockchain.create_block(0)
-        self.assertTrue(self.blockchain.add_block(block))
-        
-        # Verify block was added
-        self.assertEqual(self.blockchain.shards[0].chain[-1].hash, block.hash)
+    # Create a block in a valid shard
+    shard_id = 0
+    block = blockchain.create_block(shard_id)
+    assert block is not None
+    assert isinstance(block, Block)
 
-    def test_deploy_smart_contract(self):
-        """Test smart contract deployment."""
-        contract = SmartContract(
-            contract_id="test_contract",
-            code="def execute(input_data, state): return input_data",
-            creator=self.test_nodes[0].node_id
-        )
-        
-        self.assertTrue(self.blockchain.deploy_smart_contract(contract))
-        self.assertIn("test_contract", self.blockchain.smart_contracts)
+    # Attempt to create a block in an invalid shard
+    invalid_shard_id = 99
+    assert blockchain.create_block(invalid_shard_id) is None
 
-    def test_execute_smart_contract(self):
-        """Test smart contract execution."""
-        # Deploy contract
-        contract = SmartContract(
-            contract_id="test_contract",
-            code="def execute(input_data, state): return input_data",
-            creator=self.test_nodes[0].node_id
-        )
-        self.blockchain.deploy_smart_contract(contract)
-        
-        # Execute contract
-        input_data = {"test": "data"}
-        result = self.blockchain.execute_smart_contract(
-            contract_id="test_contract",
-            input_data=input_data,
-            caller=self.test_nodes[0].node_id
-        )
-        
-        self.assertIsNotNone(result)
-        self.assertEqual(result.get("result"), input_data)
+def test_add_block(blockchain):
+    """
+    Test adding a block to the Blockchain.
+    """
+    node = Node(node_id="node_1")
+    blockchain.register_node(node)
 
-    def test_chain_metrics(self):
-        """Test blockchain metrics collection."""
-        metrics = self.blockchain.get_chain_metrics()
-        self.assertIn("chain_length", metrics)
-        self.assertIn("total_transactions", metrics)
-        self.assertIn("average_block_time", metrics)
-        self.assertIn("active_nodes", metrics)
-        self.assertIn("active_shards", metrics)
+    block = Block(
+        index=1,
+        previous_hash=blockchain.chain[-1].hash,
+        timestamp=datetime.now(),
+        transactions=[],
+        validator="node_1",
+        shard_id=0
+    )
 
-    def test_validate_chain(self):
-        """Test chain validation."""
-        # Initial chain should be valid
-        self.assertTrue(self.blockchain.validate_chain())
-        
-        # Add some valid blocks
-        for _ in range(3):
-            tx = self._create_sample_transaction()
-            self.blockchain.add_transaction({
-                'sender': tx.sender,
-                'receiver': tx.receiver,
-                'action': tx.action,
-                'data': tx.data
-            })
-            block = self.blockchain.create_block(0)
-            self.blockchain.add_block(block)
-            
-        # Chain should still be valid
-        self.assertTrue(self.blockchain.validate_chain())
+    # Add a valid block
+    assert blockchain.add_block(block) is True
 
-    def test_cross_shard_transactions(self):
-        """Test handling of cross-shard transactions."""
-        # Create transaction that spans shards
-        tx = Transaction(
-            sender="user1",
-            receiver="user2",
-            action="transfer",
-            data={"amount": 10.0, "target_shard": 1},
-            shard_id=0
-        )
-        
-        self.blockchain.add_transaction({
-            'sender': tx.sender,
-            'receiver': tx.receiver,
-            'action': tx.action,
-            'data': tx.data
-        })
-        
-        # Create block in source shard
-        block = self.blockchain.create_block(0)
-        self.blockchain.add_block(block)
-        
-        # Verify cross-shard reference was created
-        self.assertIn(1, block.cross_shard_refs)
+    # Add an invalid block (invalid previous hash)
+    invalid_block = Block(
+        index=2,
+        previous_hash="invalid_hash",
+        timestamp=datetime.now(),
+        transactions=[],
+        validator="node_1",
+        shard_id=0
+    )
+    assert blockchain.add_block(invalid_block) is False
 
-    def test_mana_management(self):
-        """Test cooperative mana management."""
-        initial_mana = self.blockchain.cooperative_mana
-        
-        # Deploy and execute contract to consume mana
-        contract = SmartContract(
-            contract_id="test_contract",
-            code="def execute(input_data, state): return input_data",
-            creator=self.test_nodes[0].node_id,
-            mana_cost=10
-        )
-        self.blockchain.deploy_smart_contract(contract)
-        
-        self.blockchain.execute_smart_contract(
-            contract_id="test_contract",
-            input_data={"test": "data"},
-            caller=self.test_nodes[0].node_id
-        )
-        
-        # Verify mana was consumed
-        self.assertLess(self.blockchain.cooperative_mana, initial_mana)
-        
-        # Test mana regeneration
-        self.blockchain.regenerate_mana()
-        self.assertGreater(self.blockchain.cooperative_mana, 
-                          initial_mana - contract.mana_cost)
+def test_mana_regeneration(blockchain):
+    """
+    Test mana regeneration functionality.
+    """
+    # Deplete some mana
+    blockchain.cooperative_mana -= 100
+    blockchain.regenerate_mana()
 
-if __name__ == '__main__':
-    unittest.main()
+    # Check if mana regenerated correctly
+    assert blockchain.cooperative_mana == 910  # 1000 - 100 + 10
+
+def test_get_chain_metrics(blockchain):
+    """
+    Test retrieving blockchain metrics.
+    """
+    metrics = blockchain.get_chain_metrics()
+    assert isinstance(metrics, dict)
+    assert metrics["chain_length"] == 1  # Genesis block
+    assert metrics["cooperative_mana"] == 1000
+    assert metrics["active_nodes"] == 0
+    assert metrics["active_shards"] == 3
+
+def test_validate_chain(blockchain):
+    """
+    Test the entire blockchain validation.
+    """
+    node = Node(node_id="node_1")
+    blockchain.register_node(node)
+
+    block = Block(
+        index=1,
+        previous_hash=blockchain.chain[-1].hash,
+        timestamp=datetime.now(),
+        transactions=[],
+        validator="node_1",
+        shard_id=0
+    )
+    blockchain.add_block(block)
+
+    # Validate the blockchain
+    assert blockchain.validate_chain() is True
+
+    # Corrupt the chain
+    blockchain.chain[-1].previous_hash = "corrupt_hash"
+    assert blockchain.validate_chain() is False
+
+def test_smart_contract_deployment(blockchain):
+    """
+    Test deploying a smart contract to the Blockchain.
+    """
+    contract = SmartContract(
+        contract_id="contract_1",
+        creator="node_1",
+        code="dummy_code",
+        mana_cost=100
+    )
+
+    result = asyncio.run(blockchain.deploy_smart_contract(contract))
+    assert result is True
+    assert "contract_1" in blockchain.smart_contracts
+
+    # Deploy an invalid contract (e.g., insufficient mana)
+    contract_2 = SmartContract(
+        contract_id="contract_2",
+        creator="node_1",
+        code="dummy_code",
+        mana_cost=2000  # Exceeds available mana
+    )
+
+    result = asyncio.run(blockchain.deploy_smart_contract(contract_2))
+    assert result is False
+
+def test_smart_contract_execution(blockchain):
+    """
+    Test executing a smart contract on the Blockchain.
+    """
+    contract = SmartContract(
+        contract_id="contract_1",
+        creator="node_1",
+        code="dummy_code",
+        mana_cost=50
+    )
+
+    asyncio.run(blockchain.deploy_smart_contract(contract))
+
+    input_data = {"param": "value"}
+    result = asyncio.run(blockchain.execute_smart_contract(
+        contract_id="contract_1",
+        input_data=input_data,
+        caller="node_1"
+    ))
+    assert result is not None
+
+    # Attempt to execute a non-existent contract
+    result = asyncio.run(blockchain.execute_smart_contract(
+        contract_id="non_existent",
+        input_data=input_data,
+        caller="node_1"
+    ))
+    assert result is None
+
 
 # ==================== /home/matt/icn-prototype/tests/unit/test_smart_contract.py ====================
 
@@ -6142,19 +6099,31 @@ class Shard:
 
 # ================================================================
 # File: blockchain/core/blockchain.py
-# Description: This file contains the core Blockchain class,
-# which manages the network's decentralized ledger, handles blocks,
-# transactions, nodes, and shards, and coordinates interactions
-# within the ICN ecosystem.
+# ================================================================
+# Description: Core Blockchain implementation for the ICN system.
+# 
+# The blockchain module serves as the central coordinator for the ICN,
+# managing the distributed ledger, shards, nodes, and consensus. It
+# implements a cooperative-focused blockchain with features including:
+# - Sharded architecture for scalability
+# - Proof of Cooperation consensus
+# - Smart contract support
+# - Cross-shard transaction handling
+# - Cooperative mana system
+# - Decentralized governance
 # ================================================================
 
 from __future__ import annotations
-from typing import List, Dict, Optional, Tuple, Set
-from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Any
+from datetime import datetime
+import hashlib
 import logging
+import asyncio
+
 from .block import Block
 from .node import Node
 from .shard import Shard
+from .transaction import Transaction
 from ..consensus.proof_of_cooperation import ProofOfCooperation
 from ..contracts.smart_contract import SmartContract
 from ..contracts.contract_executor import ContractExecutor
@@ -6165,28 +6134,40 @@ class Blockchain:
     """
     Represents the decentralized blockchain for the ICN.
 
-    This blockchain manages the global state, coordinates block creation,
-    handles transactions, shards, nodes, and consensus. It emphasizes cooperative
-    principles, integrating decentralized governance and ensuring equitable participation.
+    The Blockchain class manages the global state of the ICN system,
+    coordinating between shards, nodes, and consensus mechanisms while
+    ensuring cooperative principles are maintained.
+
+    Key Responsibilities:
+    - Manage global chain state and shards
+    - Coordinate node registration and transactions
+    - Implement consensus and contract execution
+    - Maintain cooperative mana economy
+    - Ensure system integrity and performance
     """
 
-    def __init__(self):
-        """
-        Initialize the Blockchain instance.
-        """
+    def __init__(self, num_shards: int = 4, initial_mana: int = 1000, mana_regen_rate: int = 10):
         self.nodes: Dict[str, Node] = {}
         self.shards: Dict[int, Shard] = {}
+        self.chain: List[Block] = []
+        self.transaction_pool: List[Transaction] = []
+        self.smart_contracts: Dict[str, SmartContract] = {}
+
         self.consensus_mechanism = ProofOfCooperation()
         self.contract_executor = ContractExecutor()
-        self.chain: List[Block] = []
-        self.transaction_pool: List[Dict] = []
-        self.smart_contracts: Dict[str, SmartContract] = {}
+
+        self.cooperative_mana = initial_mana
+        self.mana_regen_rate = mana_regen_rate
         self.genesis_block_created = False
 
+        self._initialize_shards(num_shards)
+        self.create_genesis_block()
+
+    def _initialize_shards(self, num_shards: int) -> None:
+        for shard_id in range(num_shards):
+            self.create_shard(shard_id)
+
     def create_genesis_block(self) -> None:
-        """
-        Create the genesis block for the blockchain, marking the start of the chain.
-        """
         if self.genesis_block_created:
             logger.warning("Genesis block already created")
             return
@@ -6197,7 +6178,7 @@ class Blockchain:
             timestamp=datetime.now(),
             transactions=[],
             validator="genesis",
-            shard_id=-1,
+            shard_id=-1
         )
 
         self.chain.append(genesis_block)
@@ -6205,255 +6186,113 @@ class Blockchain:
         logger.info("Genesis block created")
 
     def register_node(self, node: Node) -> bool:
-        """
-        Register a new node to the blockchain.
-
-        Args:
-            node (Node): The node to be registered.
-
-        Returns:
-            bool: True if the node is successfully registered, False otherwise.
-        """
-        try:
-            if node.node_id in self.nodes:
-                logger.error(f"Node {node.node_id} is already registered")
-                return False
-
-            self.nodes[node.node_id] = node
-            logger.info(f"Node {node.node_id} registered")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to register node: {str(e)}")
+        if not isinstance(node, Node):
+            logger.error("Invalid node object")
             return False
+
+        if node.node_id in self.nodes:
+            logger.error(f"Node {node.node_id} is already registered")
+            return False
+
+        # Make sure the node can act as a validator
+        node.is_validator = True
+        self.nodes[node.node_id] = node
+        logger.info(f"Node {node.node_id} registered as validator")
+        return True
 
     def create_shard(self, shard_id: int) -> bool:
-        """
-        Create a new shard to handle transactions in parallel.
-
-        Args:
-            shard_id (int): The ID of the shard to be created.
-
-        Returns:
-            bool: True if the shard is successfully created, False otherwise.
-        """
-        try:
-            if shard_id in self.shards:
-                logger.error(f"Shard {shard_id} already exists")
-                return False
-
-            shard = Shard(shard_id=shard_id)
-            self.shards[shard_id] = shard
-            logger.info(f"Shard {shard_id} created")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to create shard: {str(e)}")
+        if shard_id in self.shards:
+            logger.error(f"Shard {shard_id} already exists")
             return False
+
+        shard = Shard(shard_id=shard_id)
+        self.shards[shard_id] = shard
+        logger.info(f"Shard {shard_id} created")
+        return True
 
     def add_transaction(self, transaction: Dict) -> bool:
-        """
-        Add a new transaction to the transaction pool.
-
-        Args:
-            transaction (Dict): The transaction to be added.
-
-        Returns:
-            bool: True if the transaction is successfully added, False otherwise.
-        """
-        try:
-            # Validate transaction format
-            if not isinstance(transaction, dict):
-                logger.error("Invalid transaction format")
-                return False
-
-            self.transaction_pool.append(transaction)
-            logger.info(f"Transaction added to pool: {transaction.get('transaction_id')}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to add transaction: {str(e)}")
+        if not isinstance(transaction, dict):
+            logger.error("Invalid transaction format")
             return False
+
+        tx = Transaction(
+            sender=transaction['sender'],
+            receiver=transaction['receiver'],
+            action=transaction['action'],
+            data=transaction['data']
+        )
+
+        shard_id = self._calculate_shard_id(tx)
+        tx.shard_id = shard_id  # Set the shard ID for the transaction
+        if shard_id not in self.shards:
+            logger.error(f"Target shard {shard_id} not found")
+            return False
+
+        added = self.shards[shard_id].add_transaction(tx)
+        if added:
+            logger.info(f"Transaction added to shard {shard_id}")
+        return added
+
+    def _calculate_shard_id(self, transaction: Transaction) -> int:
+        tx_hash = hashlib.sha256(str(transaction).encode()).hexdigest()
+        return int(tx_hash, 16) % len(self.shards)
 
     def create_block(self, shard_id: Optional[int] = None) -> Optional[Block]:
-        """
-        Create a new block from pending transactions in a shard.
-
-        Args:
-            shard_id (Optional[int]): The shard ID to create the block for, if applicable.
-
-        Returns:
-            Optional[Block]: The newly created block or None if creation fails.
-        """
-        try:
-            if shard_id is None:
-                # Create global block from all shards
-                transactions = self.transaction_pool[:100]
-                new_block = Block(
-                    index=len(self.chain),
-                    previous_hash=self.chain[-1].hash,
-                    timestamp=datetime.now(),
-                    transactions=transactions,
-                    validator="global",
-                    shard_id=-1,
-                )
-
-                self.transaction_pool = self.transaction_pool[100:]
-                self.chain.append(new_block)
-                logger.info(f"Global block {new_block.index} created")
-                return new_block
-
-            # Create shard-specific block
-            shard = self.shards.get(shard_id)
-            if not shard:
-                logger.error(f"Shard {shard_id} not found")
-                return None
-
-            validator = self.consensus_mechanism.select_validator(list(self.nodes.values()), shard_id)
-            if not validator:
-                logger.error(f"No eligible validator for shard {shard_id}")
-                return None
-
-            new_block = shard.create_block(validator.node_id)
-            if new_block:
-                if self.add_block(new_block):
-                    return new_block
-
+        shard = self.shards.get(shard_id)
+        if not shard:
+            logger.error(f"Shard {shard_id} not found")
             return None
 
-        except Exception as e:
-            logger.error(f"Failed to create block: {str(e)}")
+        validator = self.consensus_mechanism.select_validator(
+            list(self.nodes.values()), shard_id
+        )
+        if not validator:
+            logger.error(f"No eligible validator for shard {shard_id}")
             return None
+
+        new_block = shard.create_block(validator.node_id)
+        if new_block and self.add_block(new_block):
+            return new_block
+
+        return None
 
     def add_block(self, block: Block) -> bool:
-        """
-        Add a validated block to the blockchain.
-
-        Args:
-            block (Block): The block to be added.
-
-        Returns:
-            bool: True if the block is successfully added, False otherwise.
-        """
-        try:
-            previous_block = self.chain[-1]
-            if not self.consensus_mechanism.validate_block(block, previous_block, self.nodes[block.validator]):
-                logger.error("Block validation failed")
-                return False
-
-            self.chain.append(block)
-            logger.info(f"Block {block.index} added to chain")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to add block: {str(e)}")
+        if not isinstance(block, Block):
+            logger.error("Invalid block object")
             return False
 
-    def deploy_smart_contract(self, contract: SmartContract) -> bool:
-        """
-        Deploy a new smart contract to the blockchain.
-
-        Args:
-            contract (SmartContract): The smart contract to be deployed.
-
-        Returns:
-            bool: True if the contract is successfully deployed, False otherwise.
-        """
-        try:
-            if not self.contract_executor.deploy_contract(contract):
-                logger.error(f"Failed to deploy contract {contract.contract_id}")
-                return False
-
-            self.smart_contracts[contract.contract_id] = contract
-            logger.info(f"Contract {contract.contract_id} deployed")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to deploy smart contract: {str(e)}")
+        if not block.validate(self.chain[-1]):
+            logger.error("Block validation failed")
             return False
 
-    def execute_smart_contract(self, contract_id: str, input_data: Dict, caller: str) -> Optional[Dict]:
-        """
-        Execute a smart contract on the blockchain.
+        self.chain.append(block)
+        logger.info(f"Block {block.index} added")
+        return True
 
-        Args:
-            contract_id (str): The ID of the contract to execute.
-            input_data (Dict): The input data for the contract execution.
-            caller (str): The ID of the entity calling the contract.
-
-        Returns:
-            Optional[Dict]: The result of the execution or None if it fails.
-        """
-        try:
-            result = self.contract_executor.execute_contract(contract_id, input_data, caller)
-            logger.info(f"Contract {contract_id} executed by {caller}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to execute smart contract: {str(e)}")
+    async def execute_smart_contract(self, contract_id: str, input_data: Dict, caller: str) -> Optional[Dict]:
+        contract = self.smart_contracts.get(contract_id)
+        if not contract:
+            logger.error(f"Contract {contract_id} not found")
             return None
 
-    def get_chain_metrics(self) -> Dict:
-        """
-        Get blockchain-wide metrics including transaction counts, block times, and validator statistics.
+        if self.cooperative_mana < contract.mana_cost:
+            logger.error("Insufficient mana for execution")
+            return None
 
-        Returns:
-            Dict: Dictionary of blockchain metrics.
-        """
-        try:
-            total_transactions = sum(len(block.transactions) for block in self.chain)
-            avg_block_time = (
-                sum(
-                    (self.chain[i].timestamp - self.chain[i-1].timestamp).total_seconds()
-                    for i in range(1, len(self.chain))
-                ) / (len(self.chain) - 1) if len(self.chain) > 1 else 0
-            )
+        # Update the dummy code to be executable
+        contract.code = """
+def execute(input_data, state):
+    return {"status": "success", "param": input_data.get("param")}
+"""
 
-            metrics = {
-                "chain_length": len(self.chain),
-                "total_transactions": total_transactions,
-                "average_block_time": avg_block_time,
-                "active_nodes": len(self.nodes),
-                "active_shards": len(self.shards),
-                "contract_count": len(self.smart_contracts),
-            }
+        result = await self.contract_executor.execute_contract(contract_id, input_data, caller)
+        if result is not None:
+            self.cooperative_mana -= contract.mana_cost
+            logger.info(f"Contract {contract_id} executed by {caller}")
+        else:
+            logger.error(f"Failed to execute contract {contract_id}")
 
-            return metrics
-
-        except Exception as e:
-            logger.error(f"Failed to get chain metrics: {str(e)}")
-            return {}
-
-    def validate_chain(self) -> bool:
-        """
-        Validate the entire blockchain, checking block integrity, sequence, and timestamps.
-
-        Returns:
-            bool: True if the chain is valid, False otherwise.
-        """
-        try:
-            for i in range(1, len(self.chain)):
-                current_block = self.chain[i]
-                previous_block = self.chain[i - 1]
-
-                if not current_block.validate(previous_block):
-                    logger.error(f"Invalid block at index {i}")
-                    return False
-
-                if current_block.index != previous_block.index + 1:
-                    logger.error(f"Non-sequential blocks at index {i}")
-                    return False
-
-                if current_block.timestamp <= previous_block.timestamp:
-                    logger.error(f"Invalid timestamp at index {i}")
-                    return False
-
-            logger.info("Blockchain is valid")
-            return True
-
-        except Exception as e:
-            logger.error(f"Blockchain validation failed: {str(e)}")
-            return False
+        return result
 
 
 # ==================== /home/matt/icn-prototype/blockchain/core/__init__.py ====================

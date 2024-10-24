@@ -1,8 +1,17 @@
+# ================================================================
+# File: blockchain/core/blockchain.py
+# ================================================================
+# Description: Core Blockchain implementation for the ICN system.
+# 
+# This module manages the ICN blockchain, coordinating shards, nodes,
+# transactions, consensus, and smart contract execution.
+# ================================================================
+
 from __future__ import annotations
-from typing import List, Dict, Optional, Tuple, Any
-from datetime import datetime
-import hashlib
+from typing import List, Dict, Optional, Any
+from datetime import datetime, timedelta
 import logging
+import hashlib
 import asyncio
 
 from .block import Block
@@ -17,73 +26,40 @@ logger = logging.getLogger(__name__)
 
 class Blockchain:
     """
-    Represents the decentralized blockchain for the ICN.
-
-    Key Responsibilities:
-    - Manage global chain state and shards
-    - Coordinate node registration and transactions
-    - Implement consensus and contract execution
-    - Maintain cooperative mana economy
-    - Ensure system integrity and performance
+    Core Blockchain implementation for the ICN system.
+    Manages shards, transactions, blocks, nodes, consensus, and contracts.
     """
 
-    def __init__(self, num_shards: int = 4, initial_mana: int = 1000, 
-                 mana_regen_rate: int = 10):
+    def __init__(self, num_shards: int = 4, initial_mana: int = 1000, mana_regen_rate: int = 10):
         """
-        Initialize a new blockchain instance.
-
-        Attributes:
-            nodes (Dict[str, Node]): Registered nodes by node_id
-            shards (Dict[int, Shard]): Active shards by shard_id
-            chain (List[Block]): Main blockchain
-            consensus_mechanism (ProofOfCooperation): Consensus implementation
-            contract_executor (ContractExecutor): Smart contract execution engine
-            cooperative_mana (int): Available system mana
-            mana_regen_rate (int): Rate of mana regeneration
-            genesis_block_created (bool): Whether genesis block exists
+        Initialize the blockchain with specified shards, mana, and consensus.
         """
         self.nodes: Dict[str, Node] = {}
         self.shards: Dict[int, Shard] = {}
         self.chain: List[Block] = []
-        self.transaction_pool: List[Dict] = []
+        self.transaction_pool: List[Transaction] = []
         self.smart_contracts: Dict[str, SmartContract] = {}
 
-        # Initialize consensus and contract execution
         self.consensus_mechanism = ProofOfCooperation()
         self.contract_executor = ContractExecutor()
 
-        # Mana management
         self.cooperative_mana = initial_mana
         self.mana_regen_rate = mana_regen_rate
         self.genesis_block_created = False
 
-        # Set up shards and genesis block
         self._initialize_shards(num_shards)
         self.create_genesis_block()
 
     def _initialize_shards(self, num_shards: int) -> None:
         """
-        Initialize shards for the blockchain.
-
-        Args:
-            num_shards (int): Number of shards to create
-
-        Each shard is assigned a unique ID and initialized with a genesis block.
+        Initialize shards for parallel transaction processing.
         """
         for shard_id in range(num_shards):
             self.create_shard(shard_id)
 
     def create_genesis_block(self) -> None:
         """
-        Create the genesis block for the blockchain.
-
-        The genesis block has:
-        - Previous hash of zeros
-        - No transactions
-        - Special validator ID
-        - Timestamp of chain creation
-
-        It is idempotent—calling it multiple times has no effect.
+        Create the genesis block with no transactions and a special validator.
         """
         if self.genesis_block_created:
             logger.warning("Genesis block already created")
@@ -95,7 +71,7 @@ class Blockchain:
             timestamp=datetime.now(),
             transactions=[],
             validator="genesis",
-            shard_id=-1  # Global shard
+            shard_id=-1
         )
 
         self.chain.append(genesis_block)
@@ -104,113 +80,79 @@ class Blockchain:
 
     def register_node(self, node: Node) -> bool:
         """
-        Register a new node in the network.
-
-        Args:
-            node (Node): The node to register
-
-        Returns:
-            bool: True if registration is successful, False otherwise
-
-        Registration allows nodes to participate in consensus, block creation,
-        and smart contract execution.
+        Register a node and make it eligible for validation.
         """
-        if not isinstance(node, Node):
-            logger.error("Invalid node object")
+        if not isinstance(node, Node) or node.node_id in self.nodes:
+            logger.error(f"Invalid or duplicate node: {node.node_id}")
             return False
 
-        if node.node_id in self.nodes:
-            logger.error(f"Node {node.node_id} is already registered")
-            return False
-
+        node.is_validator = True
         self.nodes[node.node_id] = node
-        logger.info(f"Node {node.node_id} registered")
+        logger.info(f"Node {node.node_id} registered as validator")
         return True
 
     def create_shard(self, shard_id: int) -> bool:
         """
-        Create a new shard.
-
-        Args:
-            shard_id (int): Unique identifier for the new shard
-
-        Returns:
-            bool: True if shard created successfully, False otherwise
+        Create a new shard with the given ID.
         """
         if shard_id in self.shards:
             logger.error(f"Shard {shard_id} already exists")
             return False
 
-        shard = Shard(shard_id=shard_id)
-        self.shards[shard_id] = shard
+        self.shards[shard_id] = Shard(shard_id=shard_id)
         logger.info(f"Shard {shard_id} created")
         return True
 
     def add_transaction(self, transaction: Dict) -> bool:
         """
-        Add a transaction to the blockchain.
-
-        Args:
-            transaction (Dict): Transaction data to add
-
-        Returns:
-            bool: True if transaction added successfully, False otherwise
+        Add a transaction after initializing and validating it.
         """
         if not isinstance(transaction, dict):
             logger.error("Invalid transaction format")
             return False
 
-        try:
-            tx = Transaction(
-                sender=transaction['sender'],
-                receiver=transaction['receiver'],
-                action=transaction['action'],
-                data=transaction['data'].copy()
-            )
+        tx = Transaction(
+            sender=transaction['sender'],
+            receiver=transaction['receiver'],
+            action=transaction['action'],
+            data=transaction['data']
+        )
 
-            shard_id = self._calculate_shard_id(transaction)
+        shard_id = self._calculate_shard_id(tx)
+        tx.shard_id = shard_id
+        tx.transaction_id = self._calculate_transaction_id(tx)
 
-            if shard_id not in self.shards:
-                logger.error(f"Target shard {shard_id} not found")
-                return False
-
-            return self.shards[shard_id].add_transaction(tx)
-
-        except Exception as e:
-            logger.error(f"Failed to add transaction: {str(e)}")
+        if shard_id not in self.shards or not self.shards[shard_id].add_transaction(tx):
+            logger.error(f"Failed to add transaction {tx.transaction_id} to shard {shard_id}")
             return False
 
-    def _calculate_shard_id(self, transaction: Dict) -> int:
+        logger.info(f"Transaction {tx.transaction_id} added to shard {shard_id}")
+        return True
+
+    def _calculate_shard_id(self, transaction: Transaction) -> int:
         """
-        Calculate target shard for a transaction.
-
-        Args:
-            transaction (Dict): Transaction to assign to a shard
-
-        Returns:
-            int: Calculated shard ID
+        Calculate the shard ID for the transaction using its hash.
         """
         tx_hash = hashlib.sha256(str(transaction).encode()).hexdigest()
         return int(tx_hash, 16) % len(self.shards)
 
+    def _calculate_transaction_id(self, transaction: Transaction) -> str:
+        """
+        Calculate the transaction ID using the hash of its contents.
+        """
+        tx_hash = hashlib.sha256(str(transaction).encode()).hexdigest()
+        return tx_hash
+
     def create_block(self, shard_id: Optional[int] = None) -> Optional[Block]:
         """
-        Create a block in the specified shard.
-
-        Args:
-            shard_id (Optional[int]): Target shard, or None for global block
-
-        Returns:
-            Optional[Block]: The created block or None if creation fails
+        Create a new block in the specified shard.
         """
         shard = self.shards.get(shard_id)
         if not shard:
             logger.error(f"Shard {shard_id} not found")
             return None
 
-        validator = self.consensus_mechanism.select_validator(
-            list(self.nodes.values()), shard_id
-        )
+        validator = self.consensus_mechanism.select_validator(list(self.nodes.values()), shard_id)
         if not validator:
             logger.error(f"No eligible validator for shard {shard_id}")
             return None
@@ -223,104 +165,27 @@ class Blockchain:
 
     def add_block(self, block: Block) -> bool:
         """
-        Add a block to the blockchain.
-
-        Args:
-            block (Block): The block to add
-
-        Returns:
-            bool: True if block added successfully, False otherwise
+        Add a validated block to the chain.
         """
-        if not isinstance(block, Block):
-            logger.error("Invalid block object")
-            return False
-
-        if not block.validate(self.chain[-1]):
+        if not isinstance(block, Block) or not block.validate(self.chain[-1]):
             logger.error("Block validation failed")
             return False
 
         self.chain.append(block)
-        logger.info(f"Block {block.index} added")
+        logger.info(f"Block {block.index} added to chain")
         return True
-
-    async def deploy_smart_contract(self, contract: SmartContract) -> bool:
-        """
-        Deploy a smart contract.
-
-        Args:
-            contract (SmartContract): Contract to deploy
-
-        Returns:
-            bool: True if deployment is successful, False otherwise
-        """
-        try:
-            if not await self.contract_executor.deploy_contract(contract):
-                logger.error(f"Failed to deploy contract {contract.contract_id}")
-                return False
-
-            self.smart_contracts[contract.contract_id] = contract
-            logger.info(f"Contract {contract.contract_id} deployed")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to deploy smart contract: {str(e)}")
-            return False
-
-    async def execute_smart_contract(
-        self, contract_id: str, input_data: Dict, caller: str
-    ) -> Optional[Dict]:
-        """
-        Execute a smart contract.
-
-        Args:
-            contract_id (str): ID of the contract to execute
-            input_data (Dict): Input data for execution
-            caller (str): ID of the calling entity
-
-        Returns:
-            Optional[Dict]: Execution results or None if execution fails
-        """
-        try:
-            contract = self.smart_contracts.get(contract_id)
-            if not contract:
-                logger.error(f"Contract {contract_id} not found")
-                return None
-
-            if self.cooperative_mana < contract.mana_cost:
-                logger.error("Insufficient mana for execution")
-                return None
-
-            result = await self.contract_executor.execute_contract(
-                contract_id, input_data, caller
-            )
-
-            if result:
-                self.cooperative_mana -= contract.mana_cost
-                logger.info(f"Contract {contract_id} executed by {caller}")
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to execute smart contract: {str(e)}")
-            return None
 
     def regenerate_mana(self) -> None:
         """
-        Regenerate cooperative mana.
+        Regenerate cooperative mana up to the cap.
         """
-        self.cooperative_mana = min(
-            1000,  # Maximum mana cap
-            self.cooperative_mana + self.mana_regen_rate
-        )
+        self.cooperative_mana = min(1000, self.cooperative_mana + self.mana_regen_rate)
 
     def get_chain_metrics(self) -> Dict:
         """
-        Get blockchain metrics.
-
-        Returns:
-            Dict: Dictionary of system metrics
+        Return blockchain metrics including chain length and mana.
         """
-        metrics = {
+        return {
             "chain_length": len(self.chain),
             "total_transactions": sum(len(block.transactions) for block in self.chain),
             "average_block_time": self._calculate_average_block_time(),
@@ -329,14 +194,10 @@ class Blockchain:
             "cooperative_mana": self.cooperative_mana,
             "contract_count": len(self.smart_contracts),
         }
-        return metrics
 
     def _calculate_average_block_time(self) -> float:
         """
-        Calculate average time between blocks.
-
-        Returns:
-            float: Average block time in seconds
+        Calculate the average time between blocks.
         """
         if len(self.chain) <= 1:
             return 0.0
@@ -349,10 +210,7 @@ class Blockchain:
 
     def validate_chain(self) -> bool:
         """
-        Validate the entire blockchain.
-
-        Returns:
-            bool: True if the chain is valid, False otherwise
+        Validate the integrity of the entire chain.
         """
         for i in range(1, len(self.chain)):
             if not self.chain[i].validate(self.chain[i-1]):
@@ -361,3 +219,34 @@ class Blockchain:
 
         logger.info("Blockchain is valid")
         return True
+
+    async def deploy_smart_contract(self, contract: SmartContract) -> bool:
+        """
+        Deploy a smart contract and register it.
+        """
+        if contract.contract_id in self.smart_contracts or self.cooperative_mana < contract.mana_cost:
+            logger.error(f"Contract {contract.contract_id} deployment failed")
+            return False
+
+        self.smart_contracts[contract.contract_id] = contract
+        self.cooperative_mana -= contract.mana_cost
+        logger.info(f"Contract {contract.contract_id} deployed")
+        return True
+
+    async def execute_smart_contract(self, contract_id: str, input_data: Dict, caller: str) -> Optional[Dict]:
+        """
+        Execute a smart contract with the given input data.
+        """
+        contract = self.smart_contracts.get(contract_id)
+        if not contract or self.cooperative_mana < contract.mana_cost:
+            logger.error(f"Failed to execute contract {contract_id}")
+            return None
+
+        result = await self.contract_executor.execute_contract(contract_id, input_data, caller)
+        if result is not None:
+            self.cooperative_mana -= contract.mana_cost
+            logger.info(f"Contract {contract_id} executed by {caller}")
+        else:
+            logger.error(f"Failed to execute contract {contract_id}")
+
+        return result

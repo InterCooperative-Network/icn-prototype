@@ -1,232 +1,264 @@
-# blockchain/utils/crypto.py
+# ================================================================
+# File: blockchain/utils/crypto.py
+# Description: Contains cryptographic functions for securing the ICN
+# blockchain. Includes hashing, signing, and signature verification to
+# ensure the integrity, authenticity, and confidentiality of transactions
+# and blocks.
+# ================================================================
 
-from typing import Tuple, Optional
-import hashlib
+from typing import Any, Tuple, Optional
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hmac
+import os
+import base64
 import logging
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding, utils
-from cryptography.hazmat.primitives import serialization
-from cryptography.exceptions import InvalidSignature
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Constants for encryption/decryption
+AES_KEY_SIZE = 32
+IV_SIZE = 16
 
-class CryptoUtils:
+def generate_rsa_key_pair() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
     """
-    Utility class for cryptographic operations.
+    Generate an RSA key pair for signing and verification.
 
-    Provides methods for:
-    - Key generation and management
-    - Signing and verification
-    - Hashing
-    - Encryption and decryption
+    Returns:
+        Tuple: A tuple containing the RSA private key and public key.
     """
+    try:
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        public_key = private_key.public_key()
+        logger.info("Generated RSA key pair")
+        return private_key, public_key
 
-    @staticmethod
-    def generate_key_pair(key_size: int = 2048) -> Tuple[bytes, bytes]:
-        """
-        Generate a new RSA key pair.
+    except Exception as e:
+        logger.error(f"Failed to generate RSA key pair: {str(e)}")
+        raise
 
-        Args:
-            key_size: Size of the key in bits
+def sign_data(private_key: rsa.RSAPrivateKey, data: bytes) -> bytes:
+    """
+    Sign data using a private RSA key.
 
-        Returns:
-            Tuple of (private_key, public_key) in PEM format
-        """
-        try:
-            # Generate private key
-            private_key = rsa.generate_private_key(
-                public_exponent=65537, key_size=key_size
-            )
+    Args:
+        private_key (rsa.RSAPrivateKey): The private RSA key.
+        data (bytes): The data to be signed.
 
-            # Get public key
-            public_key = private_key.public_key()
+    Returns:
+        bytes: The signature of the data.
+    """
+    try:
+        signature = private_key.sign(
+            data,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        logger.info("Data signed successfully")
+        return signature
 
-            # Serialize keys
-            private_pem = private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
+    except Exception as e:
+        logger.error(f"Failed to sign data: {str(e)}")
+        raise
 
-            public_pem = public_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo,
-            )
+def verify_signature(
+    public_key: rsa.RSAPublicKey, signature: bytes, data: bytes
+) -> bool:
+    """
+    Verify the signature of data using a public RSA key.
 
-            return private_pem, public_pem
+    Args:
+        public_key (rsa.RSAPublicKey): The public RSA key.
+        signature (bytes): The signature to verify.
+        data (bytes): The data that was signed.
 
-        except Exception as e:
-            logger.error(f"Key generation failed: {str(e)}")
-            raise
+    Returns:
+        bool: True if the signature is valid, False otherwise.
+    """
+    try:
+        public_key.verify(
+            signature,
+            data,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        logger.info("Signature verified successfully")
+        return True
 
-    @staticmethod
-    def sign_message(message: bytes, private_key_pem: bytes) -> bytes:
-        """
-        Sign a message using a private key.
+    except Exception as e:
+        logger.error(f"Signature verification failed: {str(e)}")
+        return False
 
-        Args:
-            message: Message to sign
-            private_key_pem: Private key in PEM format
+def hash_data(data: bytes) -> str:
+    """
+    Hash data using SHA-256.
 
-        Returns:
-            bytes: Signature
-        """
-        try:
-            # Load private key
-            private_key = serialization.load_pem_private_key(
-                private_key_pem, password=None
-            )
+    Args:
+        data (bytes): The data to be hashed.
 
-            # Create signature
-            signature = private_key.sign(
-                message,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH,
-                ),
-                hashes.SHA256(),
-            )
+    Returns:
+        str: The SHA-256 hash of the data in hexadecimal format.
+    """
+    try:
+        digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+        digest.update(data)
+        hash_hex = digest.finalize().hex()
+        logger.info("Data hashed successfully")
+        return hash_hex
 
-            return signature
+    except Exception as e:
+        logger.error(f"Failed to hash data: {str(e)}")
+        raise
 
-        except Exception as e:
-            logger.error(f"Signing failed: {str(e)}")
-            raise
+def derive_key(password: bytes, salt: bytes, iterations: int = 100000) -> bytes:
+    """
+    Derive a cryptographic key from a password using PBKDF2-HMAC-SHA256.
 
-    @staticmethod
-    def verify_signature(
-        message: bytes, signature: bytes, public_key_pem: bytes
-    ) -> bool:
-        """
-        Verify a signature using a public key.
+    Args:
+        password (bytes): The password to derive the key from.
+        salt (bytes): The salt for key derivation.
+        iterations (int): Number of iterations for the key derivation.
 
-        Args:
-            message: Original message
-            signature: Signature to verify
-            public_key_pem: Public key in PEM format
+    Returns:
+        bytes: The derived key.
+    """
+    try:
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=AES_KEY_SIZE,
+            salt=salt,
+            iterations=iterations,
+            backend=default_backend()
+        )
+        key = kdf.derive(password)
+        logger.info("Key derived successfully from password")
+        return key
 
-        Returns:
-            bool: True if signature is valid
-        """
-        try:
-            # Load public key
-            public_key = serialization.load_pem_public_key(public_key_pem)
+    except Exception as e:
+        logger.error(f"Failed to derive key: {str(e)}")
+        raise
 
-            # Verify signature
-            public_key.verify(
-                signature,
-                message,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH,
-                ),
-                hashes.SHA256(),
-            )
+def aes_encrypt(key: bytes, plaintext: bytes) -> Tuple[bytes, bytes]:
+    """
+    Encrypt data using AES in CBC mode.
 
-            return True
+    Args:
+        key (bytes): The AES key.
+        plaintext (bytes): The data to be encrypted.
 
-        except InvalidSignature:
-            return False
-        except Exception as e:
-            logger.error(f"Verification failed: {str(e)}")
-            return False
+    Returns:
+        Tuple: The IV and ciphertext.
+    """
+    try:
+        iv = os.urandom(IV_SIZE)
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
 
-    @staticmethod
-    def hash_data(data: bytes) -> str:
-        """
-        Create SHA-256 hash of data.
+        # Pad plaintext to block size
+        padding_length = AES_KEY_SIZE - (len(plaintext) % AES_KEY_SIZE)
+        padded_plaintext = plaintext + bytes([padding_length] * padding_length)
 
-        Args:
-            data: Data to hash
+        ciphertext = encryptor.update(padded_plaintext) + encryptor.finalize()
+        logger.info("Data encrypted successfully")
+        return iv, ciphertext
 
-        Returns:
-            str: Hexadecimal hash string
-        """
-        try:
-            return hashlib.sha256(data).hexdigest()
-        except Exception as e:
-            logger.error(f"Hashing failed: {str(e)}")
-            raise
+    except Exception as e:
+        logger.error(f"Failed to encrypt data: {str(e)}")
+        raise
 
-    @staticmethod
-    def double_hash(data: bytes) -> str:
-        """
-        Create double SHA-256 hash (as used in Bitcoin).
+def aes_decrypt(key: bytes, iv: bytes, ciphertext: bytes) -> bytes:
+    """
+    Decrypt data using AES in CBC mode.
 
-        Args:
-            data: Data to hash
+    Args:
+        key (bytes): The AES key.
+        iv (bytes): The initialization vector (IV).
+        ciphertext (bytes): The data to be decrypted.
 
-        Returns:
-            str: Hexadecimal double hash string
-        """
-        try:
-            return hashlib.sha256(hashlib.sha256(data).digest()).hexdigest()
-        except Exception as e:
-            logger.error(f"Double hashing failed: {str(e)}")
-            raise
+    Returns:
+        bytes: The decrypted plaintext.
+    """
+    try:
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
 
-    @staticmethod
-    def merkle_root(hash_list: list) -> Optional[str]:
-        """
-        Calculate Merkle root from list of hashes.
+        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
 
-        Args:
-            hash_list: List of hash strings
+        # Remove padding
+        padding_length = padded_plaintext[-1]
+        plaintext = padded_plaintext[:-padding_length]
 
-        Returns:
-            str: Merkle root hash or None if list is empty
-        """
-        try:
-            if not hash_list:
-                return None
+        logger.info("Data decrypted successfully")
+        return plaintext
 
-            if len(hash_list) == 1:
-                return hash_list[0]
+    except Exception as e:
+        logger.error(f"Failed to decrypt data: {str(e)}")
+        raise
 
-            # Ensure even number of hashes
-            if len(hash_list) % 2 == 1:
-                hash_list.append(hash_list[-1])
+def hmac_sign(key: bytes, data: bytes) -> bytes:
+    """
+    Generate an HMAC signature for data using a symmetric key.
 
-            # Pair hashes and hash together
-            new_hash_list = []
-            for i in range(0, len(hash_list), 2):
-                combined = hash_list[i] + hash_list[i + 1]
-                new_hash = hashlib.sha256(combined.encode()).hexdigest()
-                new_hash_list.append(new_hash)
+    Args:
+        key (bytes): The symmetric key.
+        data (bytes): The data to be signed.
 
-            # Recurse until single hash remains
-            return CryptoUtils.merkle_root(new_hash_list)
+    Returns:
+        bytes: The HMAC signature.
+    """
+    try:
+        hmac_obj = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+        hmac_obj.update(data)
+        signature = hmac_obj.finalize()
+        logger.info("HMAC signature generated successfully")
+        return signature
 
-        except Exception as e:
-            logger.error(f"Merkle root calculation failed: {str(e)}")
-            raise
+    except Exception as e:
+        logger.error(f"Failed to generate HMAC signature: {str(e)}")
+        raise
 
-    @staticmethod
-    def create_timestamp() -> str:
-        """Create RFC 3339 formatted timestamp."""
-        try:
-            return datetime.utcnow().isoformat() + "Z"
-        except Exception as e:
-            logger.error(f"Timestamp creation failed: {str(e)}")
-            raise
+def hmac_verify(key: bytes, signature: bytes, data: bytes) -> bool:
+    """
+    Verify an HMAC signature for data using a symmetric key.
 
-    @classmethod
-    def verify_proof_of_work(cls, block_header: bytes, difficulty: int) -> bool:
-        """
-        Verify proof of work for a block.
+    Args:
+        key (bytes): The symmetric key.
+        signature (bytes): The HMAC signature to verify.
+        data (bytes): The data that was signed.
 
-        Args:
-            block_header: Block header data
-            difficulty: Number of leading zeros required
+    Returns:
+        bool: True if the HMAC is valid, False otherwise.
+    """
+    try:
+        hmac_obj = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+        hmac_obj.update(data)
+        hmac_obj.verify(signature)
+        logger.info("HMAC signature verified successfully")
+        return True
 
-        Returns:
-            bool: True if proof of work is valid
-        """
-        try:
-            block_hash = cls.hash_data(block_header)
-            return block_hash.startswith("0" * difficulty)
-        except Exception as e:
-            logger.error(f"Proof of work verification failed: {str(e)}")
-            return False
+    except Exception as e:
+        logger.error(f"HMAC verification failed: {str(e)}")
+        return False

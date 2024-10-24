@@ -1,4 +1,10 @@
-# blockchain/contracts/contract_executor.py
+# ================================================================
+# File: blockchain/contracts/contract_executor.py
+# Description: Manages the deployment, execution, and lifecycle
+# of smart contracts within the ICN ecosystem. The ContractExecutor
+# ensures secure and efficient contract operations, resource limits,
+# and enforces decentralized governance principles.
+# ================================================================
 
 from typing import Dict, List, Optional, Set
 import logging
@@ -8,17 +14,28 @@ from .smart_contract import SmartContract, ContractExecutionError
 
 logger = logging.getLogger(__name__)
 
-
 class ContractExecutor:
     """
     Manages smart contract deployment, execution, and lifecycle.
 
     This class handles the secure deployment of contracts, manages their
-    dependencies, and coordinates their execution while enforcing
-    resource limits and security constraints.
+    dependencies, and coordinates their execution while enforcing resource
+    limits and security constraints. It ensures that the cooperative nature
+    of the ICN is maintained, supporting fair resource sharing among nodes.
     """
 
     def __init__(self, initial_mana: int = 1000, mana_regen_rate: int = 10):
+        """
+        Initialize the ContractExecutor.
+
+        Args:
+            initial_mana (int): Initial mana pool available for execution.
+            mana_regen_rate (int): Rate at which mana regenerates over time.
+
+        The mana system represents a replenishing resource used to limit the
+        frequency and extent of smart contract executions, aligning with the ICN's
+        resource-sharing goals.
+        """
         self.contracts: Dict[str, SmartContract] = {}
         self.mana_pool = initial_mana
         self.mana_regen_rate = mana_regen_rate
@@ -38,11 +55,14 @@ class ContractExecutor:
         """
         Deploy a new smart contract.
 
+        Ensures the contract is safe, manages dependencies, and
+        updates the registry for cooperative access.
+
         Args:
-            contract: SmartContract instance to deploy
+            contract (SmartContract): SmartContract instance to deploy.
 
         Returns:
-            bool: True if deployment successful, False otherwise
+            bool: True if deployment is successful, False otherwise.
         """
         try:
             # Check if contract already exists
@@ -78,16 +98,19 @@ class ContractExecutor:
         """
         Execute a smart contract.
 
+        Executes the specified contract with the given input data and manages
+        resource consumption (mana), caller authorization, and execution safety.
+
         Args:
-            contract_id: ID of contract to execute
-            input_data: Input data for contract execution
-            caller: ID of the calling entity
+            contract_id (str): ID of the contract to execute.
+            input_data (Dict): Input data for the contract execution.
+            caller (str): ID of the calling entity.
 
         Returns:
-            Dict containing execution results
+            Dict: Results of the contract execution.
 
         Raises:
-            ContractExecutionError: If execution fails
+            ContractExecutionError: If execution fails or violates constraints.
         """
         async with self.execution_lock:
             try:
@@ -118,12 +141,29 @@ class ContractExecutor:
 
                 return result
 
+            except ContractExecutionError as e:
+                logger.error(f"Contract execution error: {str(e)}")
+                self._update_metrics(0, False)
+                raise
+
             except Exception as e:
+                logger.error(f"Execution failed: {str(e)}")
                 self._update_metrics(0, False)
                 raise ContractExecutionError(str(e))
 
     def _validate_contract_code(self, code: str) -> bool:
-        """Validate contract code for basic safety."""
+        """
+        Validate the safety of the contract code.
+
+        This method checks for dangerous imports, built-ins, and compilation
+        errors, ensuring that only safe and compliant code is deployed.
+
+        Args:
+            code (str): The code to validate.
+
+        Returns:
+            bool: True if the code is safe, False otherwise.
+        """
         try:
             # Check for dangerous imports
             dangerous_imports = ["os", "sys", "subprocess", "importlib"]
@@ -137,13 +177,10 @@ class ContractExecutor:
             for builtin in dangerous_builtins:
                 if builtin in code:
                     logger.error(f"Dangerous builtin detected: {builtin}")
-                    # blockchain/contracts/contract_executor.py (continued)
-
                     return False
 
-            # Validate code compiles
+            # Validate code compilation
             compile(code, "<string>", "exec")
-
             return True
 
         except Exception as e:
@@ -151,9 +188,20 @@ class ContractExecutor:
             return False
 
     def _validate_dependencies(self, dependencies: Set[str]) -> bool:
-        """Validate contract dependencies exist and are cyclical."""
+        """
+        Validate the contract's dependencies.
+
+        Ensures that all dependencies exist and checks for potential
+        circular dependencies that could disrupt cooperative integrity.
+
+        Args:
+            dependencies (Set[str]): Set of dependency contract IDs.
+
+        Returns:
+            bool: True if dependencies are valid, False otherwise.
+        """
         try:
-            # Check all dependencies exist
+            # Check if all dependencies exist
             for dep in dependencies:
                 if dep not in self.contracts:
                     logger.error(f"Dependency not found: {dep}")
@@ -183,7 +231,7 @@ class ContractExecutor:
                 path.pop()
                 return True
 
-            # Check each dependency
+            # Validate each dependency for cycles
             for dep in dependencies:
                 if not check_cycle(dep):
                     return False
@@ -195,10 +243,15 @@ class ContractExecutor:
             return False
 
     def _update_metrics(self, execution_time: float, success: bool) -> None:
-        """Update executor metrics after contract execution."""
+        """
+        Update execution metrics after contract execution.
+
+        Args:
+            execution_time (float): Time taken for execution.
+            success (bool): Whether the execution was successful or not.
+        """
         try:
             self.metrics["total_executions"] += 1
-
             if not success:
                 self.metrics["failed_executions"] += 1
 
@@ -214,7 +267,12 @@ class ContractExecutor:
             logger.error(f"Failed to update metrics: {str(e)}")
 
     async def regenerate_mana(self) -> None:
-        """Regenerate mana in the pool."""
+        """
+        Regenerate mana in the pool.
+
+        Mana regeneration reflects cooperative principles of resource renewal,
+        ensuring sustainable use of network resources.
+        """
         try:
             old_mana = self.mana_pool
             self.mana_pool = min(1000, self.mana_pool + self.mana_regen_rate)
@@ -226,7 +284,12 @@ class ContractExecutor:
             logger.error(f"Mana regeneration failed: {str(e)}")
 
     async def process_execution_queue(self) -> None:
-        """Process pending contract executions."""
+        """
+        Process pending contract executions from the queue.
+
+        The queue ensures that contract executions are handled fairly,
+        maintaining cooperative resource allocation.
+        """
         while True:
             try:
                 if not self.execution_queue:
@@ -251,7 +314,20 @@ class ContractExecutor:
     async def queue_execution(
         self, contract_id: str, input_data: Dict, caller: str
     ) -> bool:
-        """Queue a contract for execution."""
+        """
+        Queue a contract for execution.
+
+        Adds the contract execution request to the queue, ensuring fairness
+        and cooperative resource management.
+
+        Args:
+            contract_id (str): ID of the contract to be executed.
+            input_data (Dict): Data for contract execution.
+            caller (str): ID of the caller.
+
+        Returns:
+            bool: True if successfully queued, False otherwise.
+        """
         try:
             if len(self.execution_queue) >= self.max_queue_size:
                 logger.error("Execution queue full")
@@ -272,46 +348,36 @@ class ContractExecutor:
             logger.error(f"Failed to queue execution: {str(e)}")
             return False
 
-    def get_contract(self, contract_id: str) -> Optional[SmartContract]:
-        """Get a contract by ID."""
-        return self.contracts.get(contract_id)
-
-    def list_contracts(self) -> List[Dict]:
-        """Get list of all deployed contracts."""
-        return [
-            {
-                "contract_id": contract.contract_id,
-                "creator": contract.creator,
-                "version": contract.version,
-                "dependencies": list(contract.dependencies),
-                "metrics": contract.get_metrics(),
-            }
-            for contract in self.contracts.values()
-        ]
-
     def get_metrics(self) -> Dict:
-        """Get executor metrics."""
-        return {
-            **self.metrics,
-            "current_mana": self.mana_pool,
-            "queue_length": len(self.execution_queue),
-            "active_contracts": len(self.contracts),
-        }
+        """
+        Get executor metrics.
 
-    async def start(self) -> None:
-        """Start the contract executor."""
-        logger.info("Starting contract executor")
-        asyncio.create_task(self.process_execution_queue())
-        asyncio.create_task(self._mana_regeneration_loop())
+        Provides insights into execution statistics, mana usage, and contract
+        deployments, supporting cooperative transparency.
 
-    async def _mana_regeneration_loop(self) -> None:
-        """Continuously regenerate mana."""
-        while True:
-            await self.regenerate_mana()
-            await asyncio.sleep(60)  # Regenerate every minute
+        Returns:
+            Dict: Metrics of the contract executor.
+        """
+        try:
+            return {
+                **self.metrics,
+                "current_mana": self.mana_pool,
+                "queue_length": len(self.execution_queue),
+                "active_contracts": len(self.contracts),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get metrics: {str(e)}")
+            return {}
 
     def __str__(self) -> str:
-        """Return a human-readable string representation of the executor."""
+        """
+        Return a human-readable string representation of the executor.
+
+        Provides a summary of active contracts, mana levels, and queue status.
+
+        Returns:
+            str: String representation of the contract executor.
+        """
         return (
             f"ContractExecutor(contracts={len(self.contracts)}, "
             f"mana={self.mana_pool}, "

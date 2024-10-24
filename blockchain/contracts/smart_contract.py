@@ -1,4 +1,10 @@
-# blockchain/contracts/smart_contract.py
+# ================================================================
+# File: blockchain/contracts/smart_contract.py
+# Description: Defines the SmartContract class for the ICN blockchain.
+# This file handles the creation, execution, and lifecycle of smart
+# contracts, which operate within a secure and cooperative environment.
+# The contracts are sandboxed to ensure safety, integrity, and fairness.
+# ================================================================
 
 from __future__ import annotations
 from datetime import datetime, timedelta
@@ -12,20 +18,22 @@ from io import StringIO
 
 logger = logging.getLogger(__name__)
 
-
 class ContractExecutionError(Exception):
-    """Custom exception for contract execution errors."""
+    """
+    Custom exception for handling errors during contract execution.
 
+    This exception is raised when contract execution fails, either due to
+    code errors, resource constraints, or violation of restrictions.
+    """
     pass
-
 
 class SmartContract:
     """
     Represents a smart contract in the ICN blockchain.
 
-    Smart contracts are self-executing contracts with terms directly
-    written into code. They run in a sandboxed environment with
-    restricted capabilities for security.
+    Smart contracts are self-executing codes with terms directly written into
+    the code. They run in a secure, sandboxed environment to ensure restricted
+    capabilities, maintaining the ICN's cooperative and decentralized principles.
     """
 
     def __init__(
@@ -36,6 +44,16 @@ class SmartContract:
         mana_cost: int = 10,
         version: str = "1.0",
     ):
+        """
+        Initialize a SmartContract instance.
+
+        Args:
+            contract_id (str): Unique identifier for the contract.
+            code (str): Contract code in Python.
+            creator (str): The creator's identifier.
+            mana_cost (int): Mana required for each execution.
+            version (str): Version of the contract.
+        """
         self.contract_id = contract_id
         self.code = code
         self.creator = creator
@@ -58,26 +76,30 @@ class SmartContract:
         self.allowed_callers: Set[str] = {creator}
         self.restrictions: Dict = {
             "max_state_size": 1024 * 1024,  # 1MB
-            "max_execution_time": 5,  # seconds
-            "max_mana_per_execution": 100,
-            "max_daily_executions": 1000,
+            "max_execution_time": 5,        # seconds
+            "max_mana_per_execution": 100,  # mana
+            "max_daily_executions": 1000,   # executions
         }
         self.daily_executions = 0
         self.last_reset = datetime.now()
 
     def execute(self, input_data: Dict, available_mana: int) -> Dict:
         """
-        Execute the smart contract code with safety checks.
+        Execute the smart contract.
+
+        The contract code is executed within a sandboxed environment, ensuring
+        safety and compliance with restrictions. The function also manages state
+        updates and checks resource availability.
 
         Args:
-            input_data: Data passed to the contract
-            available_mana: Available mana for execution
+            input_data (Dict): Data passed to the contract.
+            available_mana (int): Available mana for execution.
 
         Returns:
-            Dict containing execution results and new state
+            Dict: Contains execution results, state updates, and metrics.
 
         Raises:
-            ContractExecutionError: If execution fails or violates restrictions
+            ContractExecutionError: If execution fails or violates restrictions.
         """
         # Reset daily execution counter if needed
         self._reset_daily_executions()
@@ -93,13 +115,13 @@ class SmartContract:
         sys.stdout = stdout_capture
 
         try:
-            # Set up secure execution environment
+            # Set up a secure execution environment
             local_namespace = self._setup_execution_environment(input_data)
 
             # Execute contract code
             exec(self.code, {}, local_namespace)
 
-            # Validate execution result
+            # Validate the presence of an execute function
             if "execute" not in local_namespace:
                 raise ContractExecutionError("Contract missing execute function")
 
@@ -107,7 +129,7 @@ class SmartContract:
             if time.time() - execution_start > self.restrictions["max_execution_time"]:
                 raise ContractExecutionError("Execution time limit exceeded")
 
-            # Execute contract function
+            # Execute the contract function
             result = local_namespace["execute"](input_data, self.state)
 
             # Update contract metrics
@@ -132,7 +154,19 @@ class SmartContract:
             sys.stdout = original_stdout
 
     def _validate_execution(self, input_data: Dict, available_mana: int) -> Dict:
-        """Validate execution conditions."""
+        """
+        Validate conditions for contract execution.
+
+        Checks include state size, mana availability, input data format,
+        and daily execution limits.
+
+        Args:
+            input_data (Dict): Input data for validation.
+            available_mana (int): Available mana for execution.
+
+        Returns:
+            Dict: Contains error message if validation fails.
+        """
         try:
             if self.daily_executions >= self.restrictions["max_daily_executions"]:
                 return {"error": "Daily execution limit exceeded"}
@@ -152,7 +186,15 @@ class SmartContract:
             return {"error": f"Validation failed: {str(e)}"}
 
     def _setup_execution_environment(self, input_data: Dict) -> Dict:
-        """Set up secure execution environment with allowed variables."""
+        """
+        Set up a secure execution environment with allowed variables.
+
+        Args:
+            input_data (Dict): Data passed to the contract.
+
+        Returns:
+            Dict: Secure local namespace for contract execution.
+        """
         # Basic built-ins that are safe to use
         safe_builtins = {
             "abs": abs,
@@ -181,7 +223,12 @@ class SmartContract:
         }
 
     def _update_execution_metrics(self, execution_start: float) -> None:
-        """Update contract execution metrics."""
+        """
+        Update metrics after each contract execution.
+
+        Args:
+            execution_start (float): Start time of the execution.
+        """
         self.last_executed = datetime.now()
         self.execution_count += 1
         self.daily_executions += 1
@@ -199,26 +246,52 @@ class SmartContract:
             self.execution_history = self.execution_history[-1000:]
 
     def _reset_daily_executions(self) -> None:
-        """Reset daily execution counter if needed."""
+        """
+        Reset the daily execution counter if a day has passed since the last reset.
+        """
         current_time = datetime.now()
         if (current_time - self.last_reset).days >= 1:
             self.daily_executions = 0
             self.last_reset = current_time
 
     def authorize_caller(self, caller_id: str) -> bool:
-        """Add an authorized caller."""
+        """
+        Add a caller to the list of authorized entities for contract execution.
+
+        Args:
+            caller_id (str): ID of the caller to authorize.
+
+        Returns:
+            bool: True if authorization was successful, False otherwise.
+        """
         self.allowed_callers.add(caller_id)
         return True
 
     def revoke_caller(self, caller_id: str) -> bool:
-        """Revoke caller authorization."""
+        """
+        Revoke a caller's authorization for contract execution.
+
+        Args:
+            caller_id (str): ID of the caller to revoke.
+
+        Returns:
+            bool: True if revocation was successful, False otherwise.
+        """
         if caller_id == self.creator:
             return False
         self.allowed_callers.discard(caller_id)
         return True
 
     def update_restrictions(self, new_restrictions: Dict) -> bool:
-        """Update contract restrictions."""
+        """
+        Update the contract's execution restrictions.
+
+        Args:
+            new_restrictions (Dict): New restrictions to apply.
+
+        Returns:
+            bool: True if update was successful, False otherwise.
+        """
         try:
             # Validate new restrictions
             if not all(k in self.restrictions for k in new_restrictions):
@@ -233,7 +306,12 @@ class SmartContract:
             return False
 
     def get_metrics(self) -> Dict:
-        """Get comprehensive contract metrics."""
+        """
+        Get the comprehensive metrics of the contract's performance.
+
+        Returns:
+            Dict: Metrics of the smart contract.
+        """
         return {
             "contract_id": self.contract_id,
             "version": self.version,
@@ -257,7 +335,12 @@ class SmartContract:
         }
 
     def to_dict(self) -> Dict:
-        """Convert contract to dictionary format."""
+        """
+        Convert the smart contract to a dictionary format.
+
+        Returns:
+            Dict: The dictionary representation of the contract.
+        """
         return {
             "contract_id": self.contract_id,
             "code": self.code,
@@ -278,7 +361,15 @@ class SmartContract:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "SmartContract":
-        """Create contract from dictionary."""
+        """
+        Create a SmartContract instance from a dictionary.
+
+        Args:
+            data (Dict): The dictionary containing contract data.
+
+        Returns:
+            SmartContract: The created SmartContract instance.
+        """
         contract = cls(
             contract_id=data["contract_id"],
             code=data["code"],
@@ -300,10 +391,16 @@ class SmartContract:
         return contract
 
     def __str__(self) -> str:
-        """Return a human-readable string representation of the contract."""
+        """
+        Return a human-readable string representation of the contract.
+
+        Returns:
+            str: The string representation of the contract.
+        """
         return (
             f"Contract(id={self.contract_id}, "
             f"creator={self.creator}, "
             f"executions={self.execution_count}, "
             f"mana_cost={self.mana_cost})"
         )
+        

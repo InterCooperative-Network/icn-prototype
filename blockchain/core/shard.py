@@ -1,5 +1,3 @@
-# blockchain/core/shard.py
-
 from datetime import datetime
 from typing import List, Dict, Optional
 import logging
@@ -7,7 +5,6 @@ from .transaction import Transaction
 from .block import Block
 
 logger = logging.getLogger(__name__)
-
 
 class Shard:
     """
@@ -132,9 +129,7 @@ class Shard:
             # Remove included transactions from pending pool
             tx_ids = {tx.transaction_id for tx in block.transactions}
             self.pending_transactions = [
-                tx
-                for tx in self.pending_transactions
-                if tx.transaction_id not in tx_ids
+                tx for tx in self.pending_transactions if tx.transaction_id not in tx_ids
             ]
             self.metrics["pending_count"] = len(self.pending_transactions)
 
@@ -153,8 +148,6 @@ class Shard:
     def get_latest_block(self) -> Block:
         """Get the latest block in this shard."""
         return self.chain[-1]
-
-    # blockchain/core/shard.py (continued)
 
     def validate_chain(self) -> bool:
         """Validate the entire shard chain."""
@@ -221,8 +214,7 @@ class Shard:
         try:
             current_time = datetime.now()
             self.pending_transactions = [
-                tx
-                for tx in self.pending_transactions
+                tx for tx in self.pending_transactions
                 if (current_time - tx.timestamp).total_seconds() < max_age_minutes * 60
             ]
             self.metrics["pending_count"] = len(self.pending_transactions)
@@ -268,7 +260,7 @@ class Shard:
             return {}
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "Shard":
+    def from_dict(cls, data: Dict) -> Shard:
         """Create shard from dictionary."""
         try:
             shard = cls(

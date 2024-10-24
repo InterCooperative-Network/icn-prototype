@@ -1,5 +1,3 @@
-# blockchain/core/node.py
-
 from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Dict, List, Set, Optional
@@ -7,7 +5,6 @@ import logging
 import json
 
 logger = logging.getLogger(__name__)
-
 
 class Node:
     """
@@ -139,9 +136,7 @@ class Node:
         if self.cooldown > 0:
             return False
 
-        if (
-            current_time - self.last_validation < 10
-        ):  # 10 second minimum between validations
+        if (current_time - self.last_validation) < 10:  # 10-second minimum
             return False
 
         if self.metadata["status"] != "active":
@@ -159,7 +154,7 @@ class Node:
         return True
 
     def enter_cooldown(self, cooldown_period: int) -> None:
-        """Put node into cooldown period."""
+        """Put node into a cooldown period."""
         self.cooldown = cooldown_period
         self.metadata["status"] = "cooldown"
         logger.info(

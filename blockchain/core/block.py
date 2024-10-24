@@ -8,10 +8,11 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 import hashlib
 import json
 import logging
+from copy import deepcopy
 from .transaction import Transaction
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,10 @@ class Block:
     cross_shard_refs: List[str] = field(default_factory=list)
     metadata: Dict = field(default_factory=dict)
     version: str = "1.0"
+    
+    # Track transaction IDs for duplicate prevention
+    _transaction_ids: Set[str] = field(default_factory=set, init=False, repr=False)
+    _is_deserialized: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """
@@ -45,54 +50,56 @@ class Block:
 
         This method ensures that the block's hash and Merkle root are set
         if not provided during initialization. It also sets metadata
-        indicating the block's creation time.
+        indicating the block's creation time and initializes transaction tracking.
         """
-        if not self.merkle_root:
+        # Initialize transaction ID tracking
+        self._transaction_ids = {tx.transaction_id for tx in self.transactions}
+        
+        # Sort cross-shard references for consistency
+        self.cross_shard_refs = sorted(self.cross_shard_refs)
+        
+        # Ensure metadata contains creation time
+        if "created_at" not in self.metadata:
+            self.metadata["created_at"] = datetime.now().isoformat()
+            
+        # Only calculate merkle root and hash if they're not provided
+        if not self.merkle_root and not self._is_deserialized:
             self.merkle_root = self.calculate_merkle_root()
-        if not self.hash:
+            
+        if not self.hash and not self._is_deserialized:
             self.hash = self.calculate_hash()
-        self.metadata["created_at"] = datetime.now().isoformat()
+            
+        # Validate all initial transactions match shard
+        for tx in self.transactions:
+            if tx.shard_id != self.shard_id:
+                logger.warning(f"Transaction {tx.transaction_id} shard_id doesn't match block")
 
     def calculate_merkle_root(self) -> str:
-        """
-        Calculate the Merkle root of the transactions in the block.
-
-        The Merkle root is a cryptographic summary of the block's transactions,
-        ensuring that any alteration in the transactions will result in a
-        different root, thereby preserving integrity.
-
-        Returns:
-            str: The calculated Merkle root.
-        """
+        """Calculate the Merkle root of the transactions."""
         if not self.transactions:
             return hashlib.sha256(b"empty").hexdigest()
 
-        leaves = [
-            hashlib.sha256(json.dumps(tx.to_dict()).encode()).hexdigest()
-            for tx in self.transactions
-        ]
+        leaves = []
+        # Ensure consistent transaction serialization
+        for tx in sorted(self.transactions, key=lambda t: t.transaction_id):
+            tx_dict = tx.to_dict()
+            # Remove any non-deterministic fields
+            tx_dict.pop('timestamp', None)
+            tx_json = json.dumps(tx_dict, sort_keys=True)
+            leaves.append(hashlib.sha256(tx_json.encode()).hexdigest())
 
         while len(leaves) > 1:
             if len(leaves) % 2 == 1:
-                leaves.append(leaves[-1])  # Duplicate the last leaf if odd count
+                leaves.append(leaves[-1])
             leaves = [
                 hashlib.sha256((a + b).encode()).hexdigest()
                 for a, b in zip(leaves[::2], leaves[1::2])
             ]
 
-        return leaves[0]
+        return leaves[0] if leaves else hashlib.sha256(b"empty").hexdigest()
 
     def calculate_hash(self) -> str:
-        """
-        Calculate the hash of the block.
-
-        The block hash is a cryptographic representation of the block's contents,
-        ensuring integrity and immutability within the blockchain. It uses SHA-256
-        to provide a fixed-length hash.
-
-        Returns:
-            str: The calculated block hash.
-        """
+        """Calculate the hash of the block."""
         block_dict = {
             "index": self.index,
             "previous_hash": self.previous_hash,
@@ -101,43 +108,16 @@ class Block:
             "validator": self.validator,
             "nonce": self.nonce,
             "shard_id": self.shard_id,
-            "cross_shard_refs": self.cross_shard_refs,
-            "version": self.version,
+            "cross_shard_refs": sorted(self.cross_shard_refs),
+            "version": self.version
         }
         return hashlib.sha256(
             json.dumps(block_dict, sort_keys=True).encode()
         ).hexdigest()
 
     def validate(self, previous_block: Optional["Block"] = None) -> bool:
-        """
-        Validate block structure and consistency.
-
-        This method performs various checks to ensure that the block's
-        structure, transactions, and cryptographic integrity are valid.
-
-        Args:
-            previous_block (Optional[Block]): The previous block in the chain.
-
-        Returns:
-            bool: True if the block is valid, False otherwise.
-        """
+        """Validate block structure and consistency."""
         try:
-            # Validate block hash
-            if self.hash != self.calculate_hash():
-                logger.error("Invalid block hash")
-                return False
-
-            # Validate Merkle root
-            if self.merkle_root != self.calculate_merkle_root():
-                logger.error("Invalid Merkle root")
-                return False
-
-            # Validate timestamp
-            now = datetime.now()
-            if self.timestamp > now + timedelta(minutes=5):
-                logger.error("Block timestamp is in the future")
-                return False
-
             # Validate transactions
             if not all(isinstance(tx, Transaction) for tx in self.transactions):
                 logger.error("Invalid transaction type in block")
@@ -147,7 +127,18 @@ class Block:
                 logger.error("Invalid transaction in block")
                 return False
 
-            # Validate against previous block if provided
+            # Validate timestamp
+            now = datetime.now()
+            if self.timestamp > now + timedelta(minutes=5):
+                logger.error("Block timestamp is in the future")
+                return False
+
+            # Validate shard consistency
+            if not all(tx.shard_id == self.shard_id for tx in self.transactions):
+                logger.error("Transaction shard_id mismatch")
+                return False
+
+            # Previous block validation
             if previous_block:
                 if self.previous_hash != previous_block.hash:
                     logger.error("Block's previous hash doesn't match previous block")
@@ -161,6 +152,15 @@ class Block:
                     logger.error("Block timestamp is not after previous block")
                     return False
 
+            # Only validate merkle root and hash if not deserializing
+            if not self._is_deserialized and self.merkle_root != self.calculate_merkle_root():
+                logger.error("Invalid merkle root")
+                return False
+
+            if not self._is_deserialized and self.hash != self.calculate_hash():
+                logger.error("Invalid block hash")
+                return False
+
             return True
 
         except Exception as e:
@@ -168,38 +168,37 @@ class Block:
             return False
 
     def add_transaction(self, transaction: Transaction) -> bool:
-        """
-        Add a transaction to the block.
+        """Add a transaction to the block."""
+        try:
+            # Validate transaction
+            if not transaction.validate():
+                logger.error("Cannot add invalid transaction to block")
+                return False
 
-        Ensures that only valid transactions are added, maintaining consistency
-        in terms of shard assignment and transaction integrity.
+            if transaction.shard_id != self.shard_id:
+                logger.error("Transaction shard_id doesn't match block")
+                return False
 
-        Args:
-            transaction (Transaction): The transaction to be added.
+            if transaction.transaction_id in self._transaction_ids:
+                logger.error(f"Duplicate transaction {transaction.transaction_id}")
+                return False
 
-        Returns:
-            bool: True if the transaction was added successfully, False otherwise.
-        """
-        if not transaction.validate():
-            logger.error("Cannot add invalid transaction to block")
+            # Add transaction
+            self.transactions.append(transaction)
+            self._transaction_ids.add(transaction.transaction_id)
+
+            # Update block state
+            self.merkle_root = self.calculate_merkle_root()
+            self.hash = self.calculate_hash()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to add transaction: {str(e)}")
             return False
-
-        if transaction.shard_id != self.shard_id:
-            logger.error("Transaction shard_id doesn't match block")
-            return False
-
-        self.transactions.append(transaction)
-        self.merkle_root = self.calculate_merkle_root()
-        self.hash = self.calculate_hash()
-        return True
 
     def to_dict(self) -> Dict:
-        """
-        Convert the block to a dictionary format.
-
-        Returns:
-            Dict: The dictionary representation of the block.
-        """
+        """Convert block to dictionary format."""
         return {
             "index": self.index,
             "previous_hash": self.previous_hash,
@@ -210,57 +209,40 @@ class Block:
             "nonce": self.nonce,
             "merkle_root": self.merkle_root,
             "shard_id": self.shard_id,
-            "cross_shard_refs": self.cross_shard_refs,
-            "metadata": self.metadata,
+            "cross_shard_refs": sorted(self.cross_shard_refs),
+            "metadata": deepcopy(self.metadata),
             "version": self.version,
         }
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Block":
-        """
-        Create a block instance from a dictionary.
-
-        Args:
-            data (Dict): The dictionary representation of the block.
-
-        Returns:
-            Block: The created block instance.
-
-        Raises:
-            ValueError: If the data is invalid or incomplete.
-        """
+        """Create block instance from dictionary."""
         try:
-            transactions = [Transaction.from_dict(tx) for tx in data["transactions"]]
-            timestamp = datetime.fromisoformat(data["timestamp"])
-
-            return cls(
+            # Mark as being deserialized to prevent recalculation
+            block = cls(
                 index=data["index"],
                 previous_hash=data["previous_hash"],
-                timestamp=timestamp,
-                transactions=transactions,
+                timestamp=datetime.fromisoformat(data["timestamp"]),
+                transactions=[Transaction.from_dict(tx) for tx in data["transactions"]],
                 validator=data["validator"],
                 shard_id=data["shard_id"],
                 hash=data["hash"],
                 nonce=data["nonce"],
                 merkle_root=data["merkle_root"],
-                cross_shard_refs=data.get("cross_shard_refs", []),
-                metadata=data.get("metadata", {}),
-                version=data.get("version", "1.0"),
+                cross_shard_refs=sorted(data.get("cross_shard_refs", [])),
+                metadata=deepcopy(data.get("metadata", {})),
+                version=data.get("version", "1.0")
             )
+            block._is_deserialized = True
+
+            return block
+
         except Exception as e:
             logger.error(f"Failed to create block from dictionary: {str(e)}")
-            raise ValueError("Invalid block data")
+            raise ValueError(f"Invalid block data: {str(e)}")
 
     def __str__(self) -> str:
-        """
-        Return a human-readable string representation of the block.
-
-        Provides a summary of the block's index, hash, transaction count,
-        and shard assignment.
-
-        Returns:
-            str: The block's string representation.
-        """
+        """Return human-readable string representation."""
         return (
             f"Block(index={self.index}, "
             f"hash={self.hash[:8]}..., "

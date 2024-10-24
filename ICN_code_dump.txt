@@ -1,6 +1,7 @@
 # Project Directory Structure (up to depth 2):
 icn-prototype/
     requirements.txt
+    pytest.ini
     concatenate_code_files.py
     setup.py
     .coverage
@@ -683,11 +684,596 @@ if __name__ == "__main__":
 
 # ==================== /home/matt/icn-prototype/tests/unit/test_proof_of_cooperation.py ====================
 
+import unittest
+from datetime import datetime, timedelta
+import sys
+import os
+from typing import List
+import random
 
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
+
+from blockchain.consensus.proof_of_cooperation import ProofOfCooperation
+from blockchain.core.node import Node
+from blockchain.core.block import Block
+from blockchain.core.transaction import Transaction
+
+class TestProofOfCooperation(unittest.TestCase):
+    """Test cases for the ProofOfCooperation consensus mechanism."""
+
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.poc = ProofOfCooperation(min_reputation=10.0, cooldown_blocks=3)
+        self.test_nodes = self._create_test_nodes()
+        
+        # Create genesis block
+        self.genesis_block = Block(
+            index=0,
+            previous_hash="0" * 64,
+            timestamp=datetime.now() - timedelta(minutes=10),
+            transactions=[],
+            validator="genesis",
+            shard_id=1
+        )
+
+    def _initialize_test_node(self, node_id: str) -> Node:
+        """Initialize a test node with all required attributes."""
+        node = Node(
+            node_id=node_id,
+            cooperative_id="test_coop",
+            initial_stake=100.0
+        )
+        
+        # Ensure sufficient reputation
+        base_score = 25.0  # Well above min_reputation
+        for category in node.reputation_scores:
+            node.reputation_scores[category] = base_score
+            
+        # Add successful validation history
+        node.validation_history = [
+            {
+                "timestamp": datetime.now() - timedelta(minutes=i),
+                "category": "validation",
+                "score_change": 1.0,
+                "evidence": {"success": True}
+            }
+            for i in range(20)
+        ]
+        
+        # Set high performance metrics
+        node.performance_metrics = {
+            "availability": 98.0,
+            "validation_success_rate": 95.0,
+            "network_reliability": 97.0
+        }
+        
+        # Set active state
+        node.metadata["status"] = "active"
+        node.cooldown = 0
+        node.total_validations = 15  # Experienced node
+        
+        # Add shard assignment
+        node.assign_to_shard(1)  # Assign to test shard
+        node.active_shards[1] = datetime.now() - timedelta(hours=1)
+        
+        # Add diverse cooperative interactions
+        node.cooperative_interactions = [
+            f"coop_{i % 5}" for i in range(30)
+        ]
+        
+        return node
+
+    def _create_test_nodes(self, num_nodes: int = 5) -> List[Node]:
+        """Create a list of test nodes."""
+        return [
+            self._initialize_test_node(f"node_{i}")
+            for i in range(num_nodes)
+        ]
+
+    def _create_test_block(self, index: int, previous_block: Block, validator_id: str) -> Block:
+        """Create a test block properly linked to previous block."""
+        return Block(
+            index=index,
+            previous_hash=previous_block.hash,
+            timestamp=datetime.now(),
+            transactions=[
+                Transaction(
+                    sender=f"user_{i}",
+                    receiver=f"user_{i+1}",
+                    action="transfer",
+                    data={"amount": 10.0},
+                    shard_id=1
+                )
+                for i in range(3)
+            ],
+            validator=validator_id,
+            shard_id=1
+        )
+
+    def test_initialization(self):
+        """Test ProofOfCooperation initialization."""
+        self.assertEqual(self.poc.min_reputation, 10.0)
+        self.assertEqual(self.poc.cooldown_blocks, 3)
+        self.assertGreater(len(self.poc.reputation_weights), 0)
+        self.assertGreater(len(self.poc.validation_thresholds), 0)
+        self.assertTrue(0 < self.poc.reputation_decay_factor <= 1)
+
+    def test_calculate_cooperation_score(self):
+        """Test cooperation score calculation."""
+        node = self._initialize_test_node("score_test_node")
+        
+        # Test basic score calculation
+        score = self.poc.calculate_cooperation_score(node)
+        self.assertGreater(score, 0)
+        
+        # Test with shard_id
+        shard_score = self.poc.calculate_cooperation_score(node, shard_id=1)
+        self.assertGreater(shard_score, 0)
+        
+        # Test node in cooldown
+        node.enter_cooldown(3)
+        cooldown_score = self.poc.calculate_cooperation_score(node)
+        self.assertEqual(cooldown_score, 0)
+
+    def test_validator_selection(self):
+        """Test validator selection process."""
+        nodes = [
+            self._initialize_test_node(f"select_node_{i}")
+            for i in range(5)
+        ]
+        
+        # Test basic selection
+        validator = self.poc.select_validator(nodes)
+        self.assertIsNotNone(validator)
+        self.assertIn(validator, nodes)
+        
+        # Test selection with shard_id
+        shard_validator = self.poc.select_validator(nodes, shard_id=1)
+        self.assertIsNotNone(shard_validator)
+        
+        # Test with all nodes in cooldown
+        for node in nodes:
+            node.enter_cooldown(3)
+        no_validator = self.poc.select_validator(nodes)
+        self.assertIsNone(no_validator)
+
+    def test_block_validation(self):
+        """Test block validation process."""
+        validator = self._initialize_test_node("test_validator")
+        
+        # Create a valid test block
+        test_block = self._create_test_block(1, self.genesis_block, validator.node_id)
+        
+        # Verify block validation
+        is_valid = self.poc.validate_block(test_block, self.genesis_block, validator)
+        self.assertTrue(is_valid)
+        
+        # Test invalid block (future timestamp)
+        invalid_block = Block(
+            index=1,
+            previous_hash=self.genesis_block.hash,
+            timestamp=datetime.now() + timedelta(hours=1),
+            transactions=[],
+            validator=validator.node_id,
+            shard_id=1
+        )
+        is_invalid = self.poc.validate_block(invalid_block, self.genesis_block, validator)
+        self.assertFalse(is_invalid)
+
+    def test_collusion_detection(self):
+        """Test collusion detection mechanism."""
+        node = self._initialize_test_node("collusion_test_node")
+        
+        # Create block with diverse transactions
+        diverse_block = Block(
+            index=1,
+            previous_hash=self.genesis_block.hash,
+            timestamp=datetime.now(),
+            transactions=[
+                Transaction(
+                    sender=f"user_{i}",
+                    receiver=f"user_{i+1}",
+                    action="transfer",
+                    data={"amount": 10.0},
+                    shard_id=1
+                )
+                for i in range(5)
+            ],
+            validator=node.node_id,
+            shard_id=1
+        )
+        
+        # Create block with obvious collusion pattern
+        collusion_transactions = [
+            Transaction(
+                sender="colluding_user",
+                receiver=f"receiver_{i}",  # Fixed variable scope issue
+                action="transfer",
+                data={"amount": 10.0},
+                shard_id=1
+            )
+            for i in range(5)
+        ]
+        
+        collusion_block = Block(
+            index=2,
+            previous_hash=self.genesis_block.hash,
+            timestamp=datetime.now(),
+            transactions=collusion_transactions,
+            validator=node.node_id,
+            shard_id=1
+        )
+        
+        # Test detection
+        diverse_collusion = self.poc.detect_collusion(node, diverse_block)
+        self.assertFalse(diverse_collusion)
+        
+        repeated_collusion = self.poc.detect_collusion(node, collusion_block)
+        self.assertTrue(repeated_collusion)
+
+    def test_diversity_factor(self):
+        """Test diversity factor calculation."""
+        diverse_node = self._initialize_test_node("diverse_node")
+        diverse_node.cooperative_interactions = [f"coop_{i}" for i in range(10)]
+        diverse_factor = self.poc._calculate_diversity_factor(diverse_node)
+        
+        limited_node = self._initialize_test_node("limited_node")
+        limited_node.cooperative_interactions = ["coop_1"] * 10
+        limited_factor = self.poc._calculate_diversity_factor(limited_node)
+        
+        self.assertGreater(diverse_factor, limited_factor)
+
+    def test_consistency_factor(self):
+        """Test consistency factor calculation."""
+        node = self._initialize_test_node("consistency_node")
+        
+        # Test with successful validations
+        node.validation_history = [
+            {"evidence": {"success": True}} for _ in range(10)
+        ]
+        high_consistency = self.poc._calculate_consistency_factor(node)
+        
+        # Test with mixed success
+        node.validation_history = [
+            {"evidence": {"success": i % 2 == 0}} for i in range(10)
+        ]
+        mixed_consistency = self.poc._calculate_consistency_factor(node)
+        
+        self.assertGreater(high_consistency, mixed_consistency)
+
+    def test_performance_factor(self):
+        """Test performance factor calculation."""
+        node = self._initialize_test_node("performance_node")
+        
+        # Test high performance
+        node.performance_metrics = {
+            "availability": 98.0,
+            "validation_success_rate": 95.0,
+            "network_reliability": 97.0
+        }
+        high_performance = self.poc._calculate_performance_factor(node)
+        
+        # Test lower performance
+        node.performance_metrics = {
+            "availability": 85.0,
+            "validation_success_rate": 82.0,
+            "network_reliability": 88.0
+        }
+        lower_performance = self.poc._calculate_performance_factor(node)
+        
+        self.assertGreater(high_performance, lower_performance)
+
+    def test_metrics(self):
+        """Test consensus metrics collection."""
+        # Record some validation activity
+        for i in range(5):
+            self.poc.performance_metrics["total_validations"] += 1
+            self.poc.performance_metrics["successful_validations"] += (i % 2)
+        
+        metrics = self.poc.get_metrics()
+        
+        self.assertIn("total_validations", metrics)
+        self.assertIn("successful_validations", metrics)
+        self.assertIn("average_block_time", metrics)
+        self.assertIn("collusion_detections", metrics)
+        self.assertGreaterEqual(metrics["total_validations"], 5)
+
+if __name__ == '__main__':
+    unittest.main()
 
 # ==================== /home/matt/icn-prototype/tests/unit/test_contract_executor.py ====================
 
+"""
+tests/unit/test_contract_executor.py
 
+Unit tests for the ContractExecutor class, handling contract deployment,
+execution, and lifecycle management.
+"""
+
+import pytest
+from datetime import datetime, timedelta
+import sys
+import os
+import asyncio
+from typing import Dict, List
+import logging
+
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
+
+from blockchain.contracts.contract_executor import ContractExecutor
+from blockchain.contracts.smart_contract import SmartContract, ContractExecutionError
+
+class TestContractExecutor:
+    """Test cases for the ContractExecutor class."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Setup test instance with fresh ContractExecutor."""
+        self.executor = ContractExecutor(initial_mana=1000, mana_regen_rate=10)
+
+    @pytest.fixture
+    def basic_contract_code(self):
+        """Fixture providing basic test contract code."""
+        return """
+def execute(input_data, state):
+    a = input_data.get('a', 0)
+    b = input_data.get('b', 0)
+    result = a + b
+    state['last_result'] = result
+    return result
+"""
+
+    @pytest.fixture
+    def test_contract(self, basic_contract_code):
+        """Fixture providing a test contract instance."""
+        return SmartContract(
+            contract_id="test_contract",
+            code=basic_contract_code,
+            creator="test_creator",
+            mana_cost=10
+        )
+
+    @pytest.mark.asyncio
+    async def test_deploy_contract(self, test_contract):
+        """Test contract deployment functionality."""
+        # Test successful deployment
+        success = await self.executor.deploy_contract(test_contract)
+        assert success
+        assert test_contract.contract_id in self.executor.contracts
+        
+        # Test duplicate deployment
+        success = await self.executor.deploy_contract(test_contract)
+        assert not success
+        
+        # Test contract with invalid code
+        invalid_contract = SmartContract(
+            contract_id="invalid_contract",
+            code="invalid python code :",
+            creator="test_creator"
+        )
+        success = await self.executor.deploy_contract(invalid_contract)
+        assert not success
+
+    @pytest.mark.asyncio
+    async def test_execute_contract(self, test_contract):
+        """Test contract execution."""
+        await self.executor.deploy_contract(test_contract)
+        
+        result = await self.executor.execute_contract(
+            test_contract.contract_id,
+            {"a": 5, "b": 3},
+            "test_creator"
+        )
+        assert result is not None
+        assert result.get("result") == 8
+        
+        # Test insufficient mana
+        self.executor.mana_pool = 5
+        with pytest.raises(ContractExecutionError):
+            await self.executor.execute_contract(
+                test_contract.contract_id,
+                {"a": 1, "b": 2},
+                "test_creator"
+            )
+
+    @pytest.mark.asyncio
+    async def test_execution_queue(self, test_contract):
+        """Test contract execution queue functionality."""
+        await self.executor.deploy_contract(test_contract)
+        
+        queue_success = await self.executor.queue_execution(
+            test_contract.contract_id,
+            {"a": 1, "b": 2},
+            "test_creator"
+        )
+        assert queue_success
+
+        # Test queue size limit
+        self.executor.max_queue_size = 1
+        queue_success = await self.executor.queue_execution(
+            test_contract.contract_id,
+            {"a": 3, "b": 4},
+            "test_creator"
+        )
+        assert not queue_success
+
+    @pytest.mark.asyncio
+    async def test_dependency_management(self, basic_contract_code):
+        """Test contract dependency management."""
+        base_contract = SmartContract(
+            contract_id="base_contract",
+            code=basic_contract_code,
+            creator="test_creator"
+        )
+        
+        dependent_contract = SmartContract(
+            contract_id="dependent_contract",
+            code="""
+def execute(input_data, state):
+    value = input_data.get('value', 0)
+    state['processed'] = value * 2
+    return state['processed']
+""",
+            creator="test_creator"
+        )
+        dependent_contract.dependencies.add(base_contract.contract_id)
+        
+        # Test deployment order validation
+        with pytest.raises(ContractExecutionError):
+            await self.executor.deploy_contract(dependent_contract)
+        
+        await self.executor.deploy_contract(base_contract)
+        success = await self.executor.deploy_contract(dependent_contract)
+        assert success
+
+    @pytest.mark.asyncio
+    async def test_mana_regeneration(self, test_contract):
+        """Test mana regeneration functionality."""
+        initial_mana = self.executor.mana_pool
+        
+        await self.executor.deploy_contract(test_contract)
+        await self.executor.execute_contract(
+            test_contract.contract_id,
+            {"a": 1, "b": 2},
+            "test_creator"
+        )
+        
+        used_mana = initial_mana - self.executor.mana_pool
+        await self.executor.regenerate_mana()
+        assert self.executor.mana_pool > initial_mana - used_mana
+
+    def test_metrics_collection(self):
+        """Test metrics collection and reporting."""
+        metrics = self.executor.get_metrics()
+        
+        assert "total_executions" in metrics
+        assert "failed_executions" in metrics
+        assert "total_mana_consumed" in metrics
+        assert "average_execution_time" in metrics
+        assert "contracts_deployed" in metrics
+        assert "queue_length" in metrics
+
+    @pytest.mark.asyncio
+    async def test_execution_limits(self):
+        """Test contract execution limits and restrictions."""
+        long_running_contract = SmartContract(
+            contract_id="long_running",
+            code="""
+def execute(input_data, state):
+    import time
+    time.sleep(6)  # Exceed time limit
+    return True
+""",
+            creator="test_creator"
+        )
+        
+        await self.executor.deploy_contract(long_running_contract)
+        
+        with pytest.raises(ContractExecutionError):
+            await self.executor.execute_contract(
+                long_running_contract.contract_id,
+                {},
+                "test_creator"
+            )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_execution(self, test_contract):
+        """Test concurrent contract execution handling."""
+        await self.executor.deploy_contract(test_contract)
+        
+        tasks = []
+        for i in range(5):
+            task = self.executor.execute_contract(
+                test_contract.contract_id,
+                {"a": i, "b": i},
+                "test_creator"
+            )
+            tasks.append(task)
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        successful = [r for r in results if not isinstance(r, Exception)]
+        assert len(successful) == 5
+
+    @pytest.mark.asyncio
+    async def test_error_recovery(self):
+        """Test error recovery and state management."""
+        failing_contract = SmartContract(
+            contract_id="failing_contract",
+            code="""
+def execute(input_data, state):
+    if input_data.get('fail', False):
+        raise ValueError('Intended failure')
+    state['value'] = input_data.get('value', 0)
+    return state['value']
+""",
+            creator="test_creator"
+        )
+        
+        await self.executor.deploy_contract(failing_contract)
+        
+        result = await self.executor.execute_contract(
+            failing_contract.contract_id,
+            {"value": 42},
+            "test_creator"
+        )
+        assert result["result"] == 42
+        
+        with pytest.raises(ContractExecutionError):
+            await self.executor.execute_contract(
+                failing_contract.contract_id,
+                {"fail": True},
+                "test_creator"
+            )
+        
+        result = await self.executor.execute_contract(
+            failing_contract.contract_id,
+            {"value": 100},
+            "test_creator"
+        )
+        assert result["result"] == 100
+
+    @pytest.mark.asyncio
+    async def test_authorization(self, test_contract):
+        """Test contract authorization controls."""
+        await self.executor.deploy_contract(test_contract)
+        
+        with pytest.raises(ContractExecutionError):
+            await self.executor.execute_contract(
+                test_contract.contract_id,
+                {"a": 1, "b": 2},
+                "unauthorized_user"
+            )
+        
+        test_contract.authorize_caller("new_user")
+        result = await self.executor.execute_contract(
+            test_contract.contract_id,
+            {"a": 1, "b": 2},
+            "new_user"
+        )
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_contract_cleanup(self, basic_contract_code):
+        """Test contract cleanup and resource management."""
+        contracts = []
+        for i in range(5):
+            contract = SmartContract(
+                contract_id=f"contract_{i}",
+                code=basic_contract_code,
+                creator="test_creator"
+            )
+            contracts.append(contract)
+            await self.executor.deploy_contract(contract)
+        
+        metrics = self.executor.get_metrics()
+        assert metrics["contracts_deployed"] == 5
+        
+        for contract in contracts:
+            assert contract.contract_id in self.executor.contracts
 
 # ==================== /home/matt/icn-prototype/tests/unit/test_block.py ====================
 
@@ -1896,7 +2482,262 @@ def test_smart_contract_execution(blockchain):
 
 # ==================== /home/matt/icn-prototype/tests/unit/test_smart_contract.py ====================
 
+import unittest
+from datetime import datetime, timedelta
+import sys
+import os
+from typing import Dict, Optional
 
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
+
+from blockchain.contracts.smart_contract import SmartContract, ContractExecutionError
+
+class TestSmartContract(unittest.TestCase):
+    """Test cases for the SmartContract class."""
+
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.sample_code = """
+def execute(input_data, state):
+    # Simple contract that adds numbers
+    a = input_data.get('a', 0)
+    b = input_data.get('b', 0)
+    result = a + b
+    state['last_result'] = result
+    return result
+"""
+        self.contract = SmartContract(
+            contract_id="test_contract",
+            code=self.sample_code,
+            creator="test_creator",
+            mana_cost=10,
+            version="1.0"
+        )
+
+    def test_initialization(self):
+        """Test smart contract initialization and attributes."""
+        self.assertEqual(self.contract.contract_id, "test_contract")
+        self.assertEqual(self.contract.creator, "test_creator")
+        self.assertEqual(self.contract.mana_cost, 10)
+        self.assertEqual(self.contract.version, "1.0")
+        self.assertEqual(self.contract.state, {})
+        self.assertEqual(self.contract.execution_count, 0)
+        self.assertEqual(self.contract.total_mana_consumed, 0)
+        self.assertIsNone(self.contract.last_executed)
+        self.assertIn(self.contract.creator, self.contract.allowed_callers)
+
+    def test_execute_valid_contract(self):
+        """Test execution of a valid contract."""
+        input_data = {"a": 5, "b": 3}
+        result = self.contract.execute(input_data, available_mana=20)
+        
+        self.assertEqual(result["result"], 8)
+        self.assertEqual(result["mana_used"], 10)
+        self.assertEqual(self.contract.state["last_result"], 8)
+        self.assertEqual(self.contract.execution_count, 1)
+        self.assertEqual(self.contract.total_mana_consumed, 10)
+        self.assertIsNotNone(self.contract.last_executed)
+
+    def test_execute_insufficient_mana(self):
+        """Test execution with insufficient mana."""
+        input_data = {"a": 5, "b": 3}
+        
+        with self.assertRaises(ContractExecutionError) as context:
+            self.contract.execute(input_data, available_mana=5)
+        
+        self.assertIn("Insufficient mana", str(context.exception))
+        self.assertEqual(self.contract.execution_count, 0)
+        self.assertEqual(self.contract.total_mana_consumed, 0)
+
+    def test_execute_invalid_code(self):
+        """Test execution with invalid contract code."""
+        invalid_contract = SmartContract(
+            contract_id="invalid_contract",
+            code="def invalid_function(): return 'no execute'",
+            creator="test_creator",
+            mana_cost=10
+        )
+        
+        with self.assertRaises(ContractExecutionError) as context:
+            invalid_contract.execute({}, available_mana=20)
+        
+        self.assertIn("Contract missing execute function", str(context.exception))
+
+    def test_execute_with_state_updates(self):
+        """Test contract execution with state updates."""
+        # First execution
+        result1 = self.contract.execute({"a": 5, "b": 3}, available_mana=20)
+        self.assertEqual(self.contract.state["last_result"], 8)
+        
+        # Second execution
+        result2 = self.contract.execute({"a": 2, "b": 4}, available_mana=20)
+        self.assertEqual(self.contract.state["last_result"], 6)
+        
+        self.assertEqual(self.contract.execution_count, 2)
+        self.assertEqual(self.contract.total_mana_consumed, 20)
+
+    def test_execution_limits(self):
+        """Test contract execution limits."""
+        # Set low daily limit for testing
+        self.contract.restrictions["max_daily_executions"] = 2
+        
+        # First execution
+        self.contract.execute({"a": 1, "b": 2}, available_mana=20)
+        # Second execution
+        self.contract.execute({"a": 3, "b": 4}, available_mana=20)
+        
+        # Third execution should fail
+        with self.assertRaises(ContractExecutionError) as context:
+            self.contract.execute({"a": 5, "b": 6}, available_mana=20)
+        
+        self.assertIn("Daily execution limit exceeded", str(context.exception))
+        self.assertEqual(self.contract.execution_count, 2)
+
+    def test_authorize_and_revoke_caller(self):
+        """Test caller authorization management."""
+        new_caller = "new_caller"
+        
+        # Test authorization
+        self.assertTrue(self.contract.authorize_caller(new_caller))
+        self.assertIn(new_caller, self.contract.allowed_callers)
+        
+        # Test revocation
+        self.assertTrue(self.contract.revoke_caller(new_caller))
+        self.assertNotIn(new_caller, self.contract.allowed_callers)
+        
+        # Test creator cannot be revoked
+        self.assertFalse(self.contract.revoke_caller(self.contract.creator))
+        self.assertIn(self.contract.creator, self.contract.allowed_callers)
+
+    def test_update_restrictions(self):
+        """Test updating contract restrictions."""
+        new_restrictions = {
+            "max_state_size": 2048,
+            "max_execution_time": 10
+        }
+        
+        self.assertTrue(self.contract.update_restrictions(new_restrictions))
+        self.assertEqual(self.contract.restrictions["max_state_size"], 2048)
+        self.assertEqual(self.contract.restrictions["max_execution_time"], 10)
+        
+        # Test invalid restriction update
+        invalid_restrictions = {"invalid_key": 100}
+        self.assertFalse(self.contract.update_restrictions(invalid_restrictions))
+
+    def test_serialization(self):
+        """Test contract serialization and deserialization."""
+        # Execute contract to populate some data
+        self.contract.execute({"a": 5, "b": 3}, available_mana=20)
+        
+        # Convert to dictionary
+        contract_dict = self.contract.to_dict()
+        
+        # Create new contract from dictionary
+        new_contract = SmartContract.from_dict(contract_dict)
+        
+        # Verify attributes
+        self.assertEqual(new_contract.contract_id, self.contract.contract_id)
+        self.assertEqual(new_contract.creator, self.contract.creator)
+        self.assertEqual(new_contract.code, self.contract.code)
+        self.assertEqual(new_contract.mana_cost, self.contract.mana_cost)
+        self.assertEqual(new_contract.version, self.contract.version)
+        self.assertEqual(new_contract.state, self.contract.state)
+        self.assertEqual(new_contract.restrictions, self.contract.restrictions)
+
+    def test_execution_history(self):
+        """Test execution history tracking."""
+        # Multiple executions
+        self.contract.execute({"a": 1, "b": 2}, available_mana=20)
+        self.contract.execute({"a": 3, "b": 4}, available_mana=20)
+        
+        # Check history
+        self.assertEqual(len(self.contract.execution_history), 2)
+        
+        # Verify history entries
+        latest_execution = self.contract.execution_history[-1]
+        self.assertIn("timestamp", latest_execution)
+        self.assertIn("execution_time", latest_execution)
+        self.assertIn("mana_used", latest_execution)
+        self.assertIn("state_size", latest_execution)
+
+    def test_get_metrics(self):
+        """Test contract metrics calculation."""
+        # Execute contract
+        self.contract.execute({"a": 5, "b": 3}, available_mana=20)
+        
+        metrics = self.contract.get_metrics()
+        
+        self.assertEqual(metrics["contract_id"], "test_contract")
+        self.assertEqual(metrics["version"], "1.0")
+        self.assertEqual(metrics["creator"], "test_creator")
+        self.assertEqual(metrics["execution_count"], 1)
+        self.assertEqual(metrics["total_mana_consumed"], 10)
+        self.assertGreater(metrics["state_size"], 0)
+
+    def test_state_size_limit(self):
+        """Test contract state size limitations."""
+        # Create contract that grows state
+        growing_code = """
+def execute(input_data, state):
+    # Add large data to state
+    state['data'] = 'x' * input_data['size']
+    return len(state['data'])
+"""
+        growing_contract = SmartContract(
+            contract_id="growing_contract",
+            code=growing_code,
+            creator="test_creator",
+            mana_cost=10
+        )
+        
+        # Set small state size limit
+        growing_contract.restrictions["max_state_size"] = 100
+        
+        # Execute with small state update
+        growing_contract.execute({"size": 50}, available_mana=20)
+        
+        # Execute with too large state update
+        with self.assertRaises(ContractExecutionError) as context:
+            growing_contract.execute({"size": 200}, available_mana=20)
+        
+        self.assertIn("State size limit exceeded", str(context.exception))
+
+    def test_dependencies(self):
+        """Test contract dependency management."""
+        dependency_id = "dependency_contract"
+        
+        # Add dependency
+        self.contract.dependencies.add(dependency_id)
+        self.assertIn(dependency_id, self.contract.dependencies)
+        
+        # Verify serialization includes dependencies
+        contract_dict = self.contract.to_dict()
+        self.assertIn(dependency_id, contract_dict["dependencies"])
+        
+        # Create new contract from dict and verify dependencies
+        new_contract = SmartContract.from_dict(contract_dict)
+        self.assertIn(dependency_id, new_contract.dependencies)
+
+    def test_metadata_updates(self):
+        """Test contract metadata management."""
+        # Update metadata
+        self.contract.metadata["description"] = "Test contract"
+        self.contract.metadata["tags"].add("test")
+        
+        # Verify serialization includes metadata
+        contract_dict = self.contract.to_dict()
+        self.assertEqual(contract_dict["metadata"]["description"], "Test contract")
+        self.assertIn("test", contract_dict["metadata"]["tags"])
+        
+        # Create new contract and verify metadata
+        new_contract = SmartContract.from_dict(contract_dict)
+        self.assertEqual(new_contract.metadata["description"], "Test contract")
+        self.assertIn("test", new_contract.metadata["tags"])
+
+if __name__ == '__main__':
+    unittest.main()
 
 # ==================== /home/matt/icn-prototype/tests/unit/__init__.py ====================
 
@@ -6372,225 +7213,260 @@ __all__ = [
 
 # ==================== /home/matt/icn-prototype/blockchain/contracts/contract_executor.py ====================
 
-# ================================================================
-# File: blockchain/contracts/contract_executor.py
-# Description: Manages the deployment, execution, and lifecycle
-# of smart contracts within the ICN ecosystem. The ContractExecutor
-# ensures secure and efficient contract operations, resource limits,
-# and enforces decentralized governance principles.
-# ================================================================
+"""
+blockchain/contracts/contract_executor.py
+
+This module implements the ContractExecutor for the ICN blockchain, providing
+secure contract deployment, execution, and lifecycle management. It enforces
+resource limits, security constraints, and cooperative principles.
+
+Key features:
+- Secure sandbox execution environment
+- Resource management via mana system
+- Dependency resolution and validation
+- Cross-contract communication
+- State integrity protection
+- Concurrent execution handling
+"""
 
 from typing import Dict, List, Optional, Set
 import logging
 from datetime import datetime
 import asyncio
+import re
 from .smart_contract import SmartContract, ContractExecutionError
 
 logger = logging.getLogger(__name__)
 
 class ContractExecutor:
-    """
-    Manages smart contract deployment, execution, and lifecycle.
+    """Manages smart contract deployment, execution, and lifecycle.
 
-    This class handles the secure deployment of contracts, manages their
-    dependencies, and coordinates their execution while enforcing resource
-    limits and security constraints. It ensures that the cooperative nature
-    of the ICN is maintained, supporting fair resource sharing among nodes.
+    The ContractExecutor ensures secure and fair contract operations within
+    the ICN ecosystem. It handles:
+    - Contract deployment and validation
+    - Secure execution environment
+    - Resource management (mana)
+    - Dependency resolution
+    - State management
+    - Concurrent execution
     """
+
+    # Safe imports that contracts are allowed to use
+    SAFE_IMPORTS = {
+        'math', 'datetime', 'json', 'collections',
+        'typing', 'dataclasses', 'enum', 'decimal'
+    }
+
+    # Regular expressions for code validation
+    CODE_PATTERNS = {
+        'import': re.compile(r'^import\s+(\w+)'),
+        'from_import': re.compile(r'^from\s+(\w+)\s+import'),
+        'execute_func': re.compile(r'def\s+execute\s*\([^)]*\):')
+    }
 
     def __init__(self, initial_mana: int = 1000, mana_regen_rate: int = 10):
-        """
-        Initialize the ContractExecutor.
+        """Initialize the ContractExecutor.
 
         Args:
-            initial_mana (int): Initial mana pool available for execution.
-            mana_regen_rate (int): Rate at which mana regenerates over time.
-
-        The mana system represents a replenishing resource used to limit the
-        frequency and extent of smart contract executions, aligning with the ICN's
-        resource-sharing goals.
+            initial_mana: Starting mana pool for contract execution
+            mana_regen_rate: Rate at which mana regenerates per cycle
         """
+        # Contract management
         self.contracts: Dict[str, SmartContract] = {}
+        self.dependency_graph: Dict[str, Set[str]] = {}
+        
+        # Resource management
         self.mana_pool = initial_mana
         self.mana_regen_rate = mana_regen_rate
+        self.max_mana = initial_mana * 2
+        
+        # Execution management
         self.execution_queue: List[Dict] = []
         self.max_queue_size = 1000
-        self.dependency_graph: Dict[str, Set[str]] = {}
-        self.metrics: Dict = {
+        self.execution_lock = asyncio.Lock()
+        
+        # Performance tracking
+        self.metrics = {
             "total_executions": 0,
             "failed_executions": 0,
             "total_mana_consumed": 0,
-            "average_execution_time": 0,
+            "average_execution_time": 0.0,
             "contracts_deployed": 0,
+            "successful_deployments": 0,
+            "failed_deployments": 0
         }
-        self.execution_lock = asyncio.Lock()
 
     async def deploy_contract(self, contract: SmartContract) -> bool:
-        """
-        Deploy a new smart contract.
-
-        Ensures the contract is safe, manages dependencies, and
-        updates the registry for cooperative access.
+        """Deploy a new smart contract.
 
         Args:
-            contract (SmartContract): SmartContract instance to deploy.
+            contract: SmartContract instance to deploy
 
         Returns:
-            bool: True if deployment is successful, False otherwise.
+            bool: True if deployment successful
+
+        Raises:
+            ContractExecutionError: If deployment fails due to dependency issues
         """
         try:
-            # Check if contract already exists
+            # Check for existing contract
             if contract.contract_id in self.contracts:
                 logger.error(f"Contract {contract.contract_id} already exists")
                 return False
 
-            # Validate contract code (basic safety checks)
-            if not self._validate_contract_code(contract.code):
+            # Validate contract code
+            if not await self._validate_contract_code(contract.code):
                 return False
 
-            # Check dependencies
-            if not self._validate_dependencies(contract.dependencies):
-                return False
+            # Check dependencies - now raises ContractExecutionError
+            if not await self._validate_dependencies(contract.dependencies):
+                raise ContractExecutionError("Invalid or missing dependencies")
 
-            # Update dependency graph
-            self.dependency_graph[contract.contract_id] = contract.dependencies
-
-            # Store contract
+            # Store contract and update graph
             self.contracts[contract.contract_id] = contract
+            self.dependency_graph[contract.contract_id] = contract.dependencies.copy()
+            
+            # Update metrics
             self.metrics["contracts_deployed"] += 1
-
-            logger.info(f"Deployed contract {contract.contract_id}")
+            self.metrics["successful_deployments"] += 1
+            
+            logger.info(f"Successfully deployed contract {contract.contract_id}")
             return True
+
+        except ContractExecutionError:
+            self.metrics["failed_deployments"] += 1
+            raise
 
         except Exception as e:
             logger.error(f"Contract deployment failed: {str(e)}")
+            self.metrics["failed_deployments"] += 1
+            return False
+
+    async def _validate_contract_code(self, code: str) -> bool:
+        """Validate contract code safety and structure.
+
+        Args:
+            code: Contract source code to validate
+
+        Returns:
+            bool: True if code is safe and valid
+        """
+        try:
+            # Check for execute function
+            if not self.CODE_PATTERNS['execute_func'].search(code):
+                logger.error("Contract missing execute function")
+                return False
+
+            # Validate imports
+            for line in code.split('\n'):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                # Check import statements
+                import_match = self.CODE_PATTERNS['import'].match(line)
+                from_match = self.CODE_PATTERNS['from_import'].match(line)
+
+                if import_match:
+                    module = import_match.group(1)
+                    if module not in self.SAFE_IMPORTS:
+                        logger.error(f"Unsafe import detected: {module}")
+                        return False
+                elif from_match:
+                    module = from_match.group(1)
+                    if module not in self.SAFE_IMPORTS:
+                        logger.error(f"Unsafe import detected: {module}")
+                        return False
+
+            # Test compilation
+            compile(code, '<string>', 'exec')
+            return True
+
+        except Exception as e:
+            logger.error(f"Code validation failed: {str(e)}")
             return False
 
     async def execute_contract(
         self, contract_id: str, input_data: Dict, caller: str
     ) -> Dict:
-        """
-        Execute a smart contract.
-
-        Executes the specified contract with the given input data and manages
-        resource consumption (mana), caller authorization, and execution safety.
+        """Execute a smart contract.
 
         Args:
-            contract_id (str): ID of the contract to execute.
-            input_data (Dict): Input data for the contract execution.
-            caller (str): ID of the calling entity.
+            contract_id: ID of contract to execute
+            input_data: Input parameters for contract
+            caller: ID of calling entity
 
         Returns:
-            Dict: Results of the contract execution.
+            Dict containing execution results
 
         Raises:
-            ContractExecutionError: If execution fails or violates constraints.
+            ContractExecutionError: If execution fails
         """
         async with self.execution_lock:
             try:
-                # Get contract
+                # Get and validate contract
                 contract = self.contracts.get(contract_id)
                 if not contract:
                     raise ContractExecutionError(f"Contract {contract_id} not found")
 
-                # Validate caller
+                # Check authorization
                 if caller not in contract.allowed_callers:
-                    raise ContractExecutionError("Caller not authorized")
+                    raise ContractExecutionError(f"Caller {caller} not authorized")
 
-                # Check mana availability
+                # Check mana
                 if self.mana_pool < contract.mana_cost:
-                    raise ContractExecutionError("Insufficient mana in pool")
+                    raise ContractExecutionError("Insufficient mana")
 
                 # Execute contract
                 execution_start = datetime.now()
                 result = contract.execute(input_data, self.mana_pool)
 
-                # Update mana pool
-                self.mana_pool -= result["mana_used"]
-                self.metrics["total_mana_consumed"] += result["mana_used"]
+                # Update resources
+                mana_used = result["mana_used"]
+                self.mana_pool = max(0, self.mana_pool - mana_used)
+                self.metrics["total_mana_consumed"] += mana_used
 
                 # Update metrics
                 execution_time = (datetime.now() - execution_start).total_seconds()
-                self._update_metrics(execution_time, True)
+                await self._update_metrics(execution_time, True)
 
                 return result
 
-            except ContractExecutionError as e:
-                logger.error(f"Contract execution error: {str(e)}")
-                self._update_metrics(0, False)
-                raise
-
             except Exception as e:
-                logger.error(f"Execution failed: {str(e)}")
-                self._update_metrics(0, False)
+                await self._update_metrics(0, False)
+                if isinstance(e, ContractExecutionError):
+                    raise
                 raise ContractExecutionError(str(e))
 
-    def _validate_contract_code(self, code: str) -> bool:
-        """
-        Validate the safety of the contract code.
-
-        This method checks for dangerous imports, built-ins, and compilation
-        errors, ensuring that only safe and compliant code is deployed.
+    async def _validate_dependencies(self, dependencies: Set[str]) -> bool:
+        """Validate contract dependencies.
 
         Args:
-            code (str): The code to validate.
+            dependencies: Set of contract IDs this contract depends on
 
         Returns:
-            bool: True if the code is safe, False otherwise.
+            bool: True if dependencies are valid
+
+        Raises:
+            ContractExecutionError: If dependencies are invalid or missing
         """
         try:
-            # Check for dangerous imports
-            dangerous_imports = ["os", "sys", "subprocess", "importlib"]
-            for imp in dangerous_imports:
-                if f"import {imp}" in code or f"from {imp}" in code:
-                    logger.error(f"Dangerous import detected: {imp}")
-                    return False
-
-            # Check for dangerous built-ins
-            dangerous_builtins = ["exec", "eval", "open", "__import__"]
-            for builtin in dangerous_builtins:
-                if builtin in code:
-                    logger.error(f"Dangerous builtin detected: {builtin}")
-                    return False
-
-            # Validate code compilation
-            compile(code, "<string>", "exec")
-            return True
-
-        except Exception as e:
-            logger.error(f"Contract code validation failed: {str(e)}")
-            return False
-
-    def _validate_dependencies(self, dependencies: Set[str]) -> bool:
-        """
-        Validate the contract's dependencies.
-
-        Ensures that all dependencies exist and checks for potential
-        circular dependencies that could disrupt cooperative integrity.
-
-        Args:
-            dependencies (Set[str]): Set of dependency contract IDs.
-
-        Returns:
-            bool: True if dependencies are valid, False otherwise.
-        """
-        try:
-            # Check if all dependencies exist
+            # Check existence
             for dep in dependencies:
                 if dep not in self.contracts:
-                    logger.error(f"Dependency not found: {dep}")
-                    return False
+                    msg = f"Dependency not found: {dep}"
+                    logger.error(msg)
+                    raise ContractExecutionError(msg)
 
-            # Check for circular dependencies
-            visited = set()
-            path = []
+            # Check for cycles
+            visited: Set[str] = set()
+            path: List[str] = []
 
-            def check_cycle(contract_id: str) -> bool:
+            async def check_cycle(contract_id: str) -> bool:
                 if contract_id in path:
-                    logger.error(
-                        f"Circular dependency detected: {' -> '.join(path + [contract_id])}"
-                    )
-                    return False
+                    cycle = ' -> '.join(path + [contract_id])
+                    logger.error(f"Circular dependency detected: {cycle}")
+                    raise ContractExecutionError(f"Circular dependency: {cycle}")
 
                 if contract_id in visited:
                     return True
@@ -6599,30 +7475,32 @@ class ContractExecutor:
                 path.append(contract_id)
 
                 for dep in self.dependency_graph.get(contract_id, set()):
-                    if not check_cycle(dep):
+                    if not await check_cycle(dep):
                         return False
 
                 path.pop()
                 return True
 
-            # Validate each dependency for cycles
+            # Check each dependency
             for dep in dependencies:
-                if not check_cycle(dep):
-                    return False
+                if not await check_cycle(dep):
+                    raise ContractExecutionError("Dependency cycle detected")
 
             return True
 
+        except ContractExecutionError:
+            raise
+
         except Exception as e:
             logger.error(f"Dependency validation failed: {str(e)}")
-            return False
+            raise ContractExecutionError(f"Dependency validation failed: {str(e)}")
 
-    def _update_metrics(self, execution_time: float, success: bool) -> None:
-        """
-        Update execution metrics after contract execution.
+    async def _update_metrics(self, execution_time: float, success: bool) -> None:
+        """Update executor metrics.
 
         Args:
-            execution_time (float): Time taken for execution.
-            success (bool): Whether the execution was successful or not.
+            execution_time: Time taken for execution
+            success: Whether execution was successful
         """
         try:
             self.metrics["total_executions"] += 1
@@ -6630,174 +7508,151 @@ class ContractExecutor:
                 self.metrics["failed_executions"] += 1
 
             # Update average execution time
-            total_time = self.metrics["average_execution_time"] * (
-                self.metrics["total_executions"] - 1
-            )
-            self.metrics["average_execution_time"] = (
-                total_time + execution_time
-            ) / self.metrics["total_executions"]
+            total = self.metrics["average_execution_time"] * (self.metrics["total_executions"] - 1)
+            self.metrics["average_execution_time"] = (total + execution_time) / self.metrics["total_executions"]
 
         except Exception as e:
             logger.error(f"Failed to update metrics: {str(e)}")
 
     async def regenerate_mana(self) -> None:
-        """
-        Regenerate mana in the pool.
-
-        Mana regeneration reflects cooperative principles of resource renewal,
-        ensuring sustainable use of network resources.
-        """
+        """Regenerate mana pool resources."""
         try:
             old_mana = self.mana_pool
-            self.mana_pool = min(1000, self.mana_pool + self.mana_regen_rate)
-
+            self.mana_pool = min(self.max_mana, self.mana_pool + self.mana_regen_rate)
+            
             if self.mana_pool > old_mana:
                 logger.debug(f"Regenerated mana: {self.mana_pool - old_mana}")
 
         except Exception as e:
             logger.error(f"Mana regeneration failed: {str(e)}")
 
-    async def process_execution_queue(self) -> None:
-        """
-        Process pending contract executions from the queue.
+    def get_metrics(self) -> Dict:
+        """Get executor metrics and statistics."""
+        return {
+            **self.metrics,
+            "current_mana": self.mana_pool,
+            "queue_length": len(self.execution_queue),
+            "active_contracts": len(self.contracts)
+        }
 
-        The queue ensures that contract executions are handled fairly,
-        maintaining cooperative resource allocation.
-        """
-        while True:
-            try:
-                if not self.execution_queue:
-                    await asyncio.sleep(1)
-                    continue
-
-                # Get next execution request
-                request = self.execution_queue.pop(0)
-
-                # Execute contract
-                await self.execute_contract(
-                    request["contract_id"], request["input_data"], request["caller"]
-                )
-
-                # Regenerate some mana
-                await self.regenerate_mana()
-
-            except Exception as e:
-                logger.error(f"Queue processing error: {str(e)}")
-                await asyncio.sleep(1)
-
-    async def queue_execution(
-        self, contract_id: str, input_data: Dict, caller: str
-    ) -> bool:
-        """
-        Queue a contract for execution.
-
-        Adds the contract execution request to the queue, ensuring fairness
-        and cooperative resource management.
+    async def queue_execution(self, contract_id: str, input_data: Dict, caller: str) -> bool:
+        """Queue a contract execution request.
 
         Args:
-            contract_id (str): ID of the contract to be executed.
-            input_data (Dict): Data for contract execution.
-            caller (str): ID of the caller.
+            contract_id: ID of contract to execute
+            input_data: Input parameters
+            caller: ID of calling entity
 
         Returns:
-            bool: True if successfully queued, False otherwise.
+            bool: True if successfully queued
         """
         try:
             if len(self.execution_queue) >= self.max_queue_size:
                 logger.error("Execution queue full")
                 return False
 
-            self.execution_queue.append(
-                {
-                    "contract_id": contract_id,
-                    "input_data": input_data,
-                    "caller": caller,
-                    "timestamp": datetime.now(),
-                }
-            )
-
+            self.execution_queue.append({
+                "contract_id": contract_id,
+                "input_data": input_data,
+                "caller": caller,
+                "timestamp": datetime.now()
+            })
             return True
 
         except Exception as e:
             logger.error(f"Failed to queue execution: {str(e)}")
             return False
 
-    def get_metrics(self) -> Dict:
-        """
-        Get executor metrics.
-
-        Provides insights into execution statistics, mana usage, and contract
-        deployments, supporting cooperative transparency.
-
-        Returns:
-            Dict: Metrics of the contract executor.
-        """
-        try:
-            return {
-                **self.metrics,
-                "current_mana": self.mana_pool,
-                "queue_length": len(self.execution_queue),
-                "active_contracts": len(self.contracts),
-            }
-        except Exception as e:
-            logger.error(f"Failed to get metrics: {str(e)}")
-            return {}
-
     def __str__(self) -> str:
-        """
-        Return a human-readable string representation of the executor.
-
-        Provides a summary of active contracts, mana levels, and queue status.
-
-        Returns:
-            str: String representation of the contract executor.
-        """
+        """Return a human-readable string representation of the executor."""
         return (
             f"ContractExecutor(contracts={len(self.contracts)}, "
             f"mana={self.mana_pool}, "
             f"queue={len(self.execution_queue)})"
         )
 
-
 # ==================== /home/matt/icn-prototype/blockchain/contracts/smart_contract.py ====================
 
-# ================================================================
-# File: blockchain/contracts/smart_contract.py
-# Description: Defines the SmartContract class for the ICN blockchain.
-# This file handles the creation, execution, and lifecycle of smart
-# contracts, which operate within a secure and cooperative environment.
-# The contracts are sandboxed to ensure safety, integrity, and fairness.
-# ================================================================
+"""
+blockchain/contracts/smart_contract.py
+
+This module implements the SmartContract class for the ICN blockchain, providing
+a secure, sandboxed environment for executing decentralized code. The implementation
+follows cooperative principles and ensures fair resource usage.
+
+Key features:
+- Secure execution environment with restricted capabilities
+- Resource management through mana system
+- State persistence and size limitations
+- Execution history and metrics tracking
+- Caller authorization management
+- Cross-contract dependencies
+- Daily execution limits and cooldowns
+"""
 
 from __future__ import annotations
 from datetime import datetime, timedelta
-from typing import Dict, List, Set, Optional, Any
+from typing import Dict, List, Set, Optional, Any, Union
 import time
 import logging
 import hashlib
 import json
 import sys
 from io import StringIO
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
 class ContractExecutionError(Exception):
-    """
-    Custom exception for handling errors during contract execution.
-
-    This exception is raised when contract execution fails, either due to
-    code errors, resource constraints, or violation of restrictions.
+    """Exception raised for contract execution failures.
+    
+    This includes:
+    - Code execution errors
+    - Resource limit violations
+    - State size exceeded
+    - Authorization failures
+    - Timeout errors
     """
     pass
 
 class SmartContract:
+    """Smart contract implementation for the ICN blockchain.
+    
+    Smart contracts are self-executing code units that run in a secure sandbox.
+    They maintain state, track execution metrics, and enforce resource limits
+    to ensure fair usage of network resources.
+    
+    Attributes:
+        contract_id (str): Unique identifier for the contract
+        code (str): Python source code of the contract
+        creator (str): Identity of contract creator
+        state (Dict): Contract's persistent state storage
+        mana_cost (int): Mana required per execution
+        version (str): Contract version identifier
+        
+    Resource Limits:
+        - Maximum state size (default: 1MB)
+        - Maximum execution time (default: 5s)
+        - Maximum mana per execution (default: 100)
+        - Maximum daily executions (default: 1000)
     """
-    Represents a smart contract in the ICN blockchain.
 
-    Smart contracts are self-executing codes with terms directly written into
-    the code. They run in a secure, sandboxed environment to ensure restricted
-    capabilities, maintaining the ICN's cooperative and decentralized principles.
-    """
+    # Safe built-ins allowed in contract execution
+    SAFE_BUILTINS = {
+        "abs": abs,
+        "bool": bool,
+        "dict": dict,
+        "float": float,
+        "int": int,
+        "len": len,
+        "list": list,
+        "max": max,
+        "min": min,
+        "round": round,
+        "sorted": sorted,
+        "str": str,
+        "sum": sum,
+    }
 
     def __init__(
         self,
@@ -6806,129 +7661,145 @@ class SmartContract:
         creator: str,
         mana_cost: int = 10,
         version: str = "1.0",
-    ):
-        """
-        Initialize a SmartContract instance.
-
+    ) -> None:
+        """Initialize a new smart contract.
+        
         Args:
-            contract_id (str): Unique identifier for the contract.
-            code (str): Contract code in Python.
-            creator (str): The creator's identifier.
-            mana_cost (int): Mana required for each execution.
-            version (str): Version of the contract.
+            contract_id: Unique identifier for the contract
+            code: Contract source code in Python
+            creator: Identity of the contract creator
+            mana_cost: Mana cost per execution
+            version: Version string for the contract
+            
+        The constructor initializes execution tracking, state storage,
+        and resource limits while setting up the secure execution environment.
         """
+        # Basic contract information
         self.contract_id = contract_id
         self.code = code
         self.creator = creator
         self.state: Dict = {}
         self.mana_cost = mana_cost
         self.version = version
+        
+        # Execution tracking
         self.created_at = datetime.now()
-        self.last_executed = None
+        self.last_executed: Optional[datetime] = None
         self.execution_count = 0
         self.total_mana_consumed = 0
         self.execution_history: List[Dict] = []
+        
+        # Previous state for rollback
+        self._previous_state: Optional[Dict] = None
+        
+        # Metadata and capabilities
         self.metadata: Dict = {
             "created_at": self.created_at,
             "version": version,
             "creator": creator,
             "description": "",
             "tags": set(),
+            "last_updated": self.created_at
         }
+        
+        # Dependencies and authorization
         self.dependencies: Set[str] = set()
         self.allowed_callers: Set[str] = {creator}
+        
+        # Resource restrictions
         self.restrictions: Dict = {
             "max_state_size": 1024 * 1024,  # 1MB
-            "max_execution_time": 5,        # seconds
-            "max_mana_per_execution": 100,  # mana
-            "max_daily_executions": 1000,   # executions
+            "max_execution_time": 5,         # seconds
+            "max_mana_per_execution": 100,   # mana
+            "max_daily_executions": 1000,    # executions
         }
+        
+        # Daily execution tracking
         self.daily_executions = 0
         self.last_reset = datetime.now()
 
     def execute(self, input_data: Dict, available_mana: int) -> Dict:
-        """
-        Execute the smart contract.
-
-        The contract code is executed within a sandboxed environment, ensuring
-        safety and compliance with restrictions. The function also manages state
-        updates and checks resource availability.
-
+        """Execute the smart contract with given input data.
+        
         Args:
-            input_data (Dict): Data passed to the contract.
-            available_mana (int): Available mana for execution.
-
+            input_data: Dictionary of input parameters for the contract
+            available_mana: Amount of mana available for execution
+            
         Returns:
-            Dict: Contains execution results, state updates, and metrics.
-
+            Dictionary containing:
+            - execution result
+            - updated state
+            - mana consumed
+            - execution time
+            - output captured
+            
         Raises:
-            ContractExecutionError: If execution fails or violates restrictions.
+            ContractExecutionError: If execution fails or violates restrictions
         """
-        # Reset daily execution counter if needed
         self._reset_daily_executions()
-
-        # Validate execution conditions
-        validation_result = self._validate_execution(input_data, available_mana)
-        if validation_result.get("error"):
-            raise ContractExecutionError(validation_result["error"])
-
-        execution_start = time.time()
-        stdout_capture = StringIO()
-        original_stdout = sys.stdout
-        sys.stdout = stdout_capture
-
+        self._backup_state()
+        
         try:
-            # Set up a secure execution environment
-            local_namespace = self._setup_execution_environment(input_data)
+            # Validate execution conditions
+            validation_result = self._validate_execution(input_data, available_mana)
+            if validation_result.get("error"):
+                raise ContractExecutionError(validation_result["error"])
 
-            # Execute contract code
-            exec(self.code, {}, local_namespace)
+            execution_start = time.time()
+            stdout_capture = StringIO()
+            original_stdout = sys.stdout
+            sys.stdout = stdout_capture
 
-            # Validate the presence of an execute function
-            if "execute" not in local_namespace:
-                raise ContractExecutionError("Contract missing execute function")
+            try:
+                # Set up and execute
+                local_namespace = self._setup_execution_environment(input_data)
+                exec(self.code, {}, local_namespace)
 
-            # Check execution time
-            if time.time() - execution_start > self.restrictions["max_execution_time"]:
-                raise ContractExecutionError("Execution time limit exceeded")
+                if "execute" not in local_namespace:
+                    raise ContractExecutionError("Contract missing execute function")
 
-            # Execute the contract function
-            result = local_namespace["execute"](input_data, self.state)
+                # Execute with timing check
+                if time.time() - execution_start > self.restrictions["max_execution_time"]:
+                    raise ContractExecutionError("Execution time limit exceeded")
 
-            # Update contract metrics
-            self._update_execution_metrics(execution_start)
+                result = local_namespace["execute"](input_data, self.state)
 
-            # Capture any output
-            output = stdout_capture.getvalue()
+                # Validate post-execution state
+                if len(str(self.state)) > self.restrictions["max_state_size"]:
+                    self._rollback_state()
+                    raise ContractExecutionError("State size limit exceeded after execution")
 
-            return {
-                "state": self.state,
-                "result": result,
-                "mana_used": self.mana_cost,
-                "execution_time": time.time() - execution_start,
-                "output": output,
-            }
+                # Update metrics and return result
+                self._update_execution_metrics(execution_start)
+                output = stdout_capture.getvalue()
 
+                return {
+                    "state": self.state,
+                    "result": result,
+                    "mana_used": self.mana_cost,
+                    "execution_time": time.time() - execution_start,
+                    "output": output,
+                }
+
+            finally:
+                sys.stdout = original_stdout
+
+        except ContractExecutionError:
+            self._rollback_state()
+            raise
         except Exception as e:
+            self._rollback_state()
             logger.error(f"Contract execution failed: {str(e)}")
             raise ContractExecutionError(str(e))
 
-        finally:
-            sys.stdout = original_stdout
-
     def _validate_execution(self, input_data: Dict, available_mana: int) -> Dict:
-        """
-        Validate conditions for contract execution.
-
-        Checks include state size, mana availability, input data format,
-        and daily execution limits.
-
-        Args:
-            input_data (Dict): Input data for validation.
-            available_mana (int): Available mana for execution.
-
-        Returns:
-            Dict: Contains error message if validation fails.
+        """Validate all conditions required for contract execution.
+        
+        Performs comprehensive validation including:
+        - Daily execution limits
+        - Mana availability
+        - Current and projected state size
+        - Input data format
         """
         try:
             if self.daily_executions >= self.restrictions["max_daily_executions"]:
@@ -6937,8 +7808,11 @@ class SmartContract:
             if available_mana < self.mana_cost:
                 return {"error": "Insufficient mana"}
 
-            if len(str(self.state)) > self.restrictions["max_state_size"]:
-                return {"error": "State size limit exceeded"}
+            # Calculate potential state size
+            current_state_size = len(str(self.state))
+            potential_growth = len(str(input_data)) * 2  # Conservative estimate
+            if current_state_size + potential_growth > self.restrictions["max_state_size"]:
+                return {"error": "Projected state size would exceed limit"}
 
             if not isinstance(input_data, dict):
                 return {"error": "Invalid input data format"}
@@ -6948,49 +7822,41 @@ class SmartContract:
         except Exception as e:
             return {"error": f"Validation failed: {str(e)}"}
 
+    def _backup_state(self) -> None:
+        """Create a backup of the current state for potential rollback."""
+        self._previous_state = deepcopy(self.state)
+
+    def _rollback_state(self) -> None:
+        """Rollback to the previous state if available."""
+        if self._previous_state is not None:
+            self.state = self._previous_state
+            self._previous_state = None
+
     def _setup_execution_environment(self, input_data: Dict) -> Dict:
+        """Create a secure execution environment for the contract.
+        
+        Sets up a restricted namespace with only safe operations allowed.
+        Provides access to contract state and metadata while preventing
+        access to system resources.
         """
-        Set up a secure execution environment with allowed variables.
-
-        Args:
-            input_data (Dict): Data passed to the contract.
-
-        Returns:
-            Dict: Secure local namespace for contract execution.
-        """
-        # Basic built-ins that are safe to use
-        safe_builtins = {
-            "abs": abs,
-            "bool": bool,
-            "dict": dict,
-            "float": float,
-            "int": int,
-            "len": len,
-            "list": list,
-            "max": max,
-            "min": min,
-            "round": round,
-            "sorted": sorted,
-            "str": str,
-            "sum": sum,
-        }
-
         return {
             "input": input_data,
-            "state": self.state.copy(),
+            "state": self.state,
             "contract_id": self.contract_id,
             "creator": self.creator,
             "version": self.version,
-            "metadata": self.metadata,
-            "__builtins__": safe_builtins,
+            "metadata": self.metadata.copy(),
+            "__builtins__": self.SAFE_BUILTINS,
         }
 
     def _update_execution_metrics(self, execution_start: float) -> None:
-        """
-        Update metrics after each contract execution.
-
-        Args:
-            execution_start (float): Start time of the execution.
+        """Update all execution metrics after successful execution.
+        
+        Updates:
+        - Execution count and history
+        - Mana consumption
+        - Timing information
+        - State size tracking
         """
         self.last_executed = datetime.now()
         self.execution_count += 1
@@ -7009,72 +7875,38 @@ class SmartContract:
             self.execution_history = self.execution_history[-1000:]
 
     def _reset_daily_executions(self) -> None:
-        """
-        Reset the daily execution counter if a day has passed since the last reset.
-        """
+        """Reset daily execution counter if a day has passed."""
         current_time = datetime.now()
         if (current_time - self.last_reset).days >= 1:
             self.daily_executions = 0
             self.last_reset = current_time
 
     def authorize_caller(self, caller_id: str) -> bool:
-        """
-        Add a caller to the list of authorized entities for contract execution.
-
-        Args:
-            caller_id (str): ID of the caller to authorize.
-
-        Returns:
-            bool: True if authorization was successful, False otherwise.
-        """
+        """Add a new authorized caller for the contract."""
         self.allowed_callers.add(caller_id)
         return True
 
     def revoke_caller(self, caller_id: str) -> bool:
-        """
-        Revoke a caller's authorization for contract execution.
-
-        Args:
-            caller_id (str): ID of the caller to revoke.
-
-        Returns:
-            bool: True if revocation was successful, False otherwise.
-        """
+        """Revoke a caller's authorization (except creator)."""
         if caller_id == self.creator:
             return False
         self.allowed_callers.discard(caller_id)
         return True
 
     def update_restrictions(self, new_restrictions: Dict) -> bool:
-        """
-        Update the contract's execution restrictions.
-
-        Args:
-            new_restrictions (Dict): New restrictions to apply.
-
-        Returns:
-            bool: True if update was successful, False otherwise.
-        """
+        """Update contract restrictions if valid."""
         try:
-            # Validate new restrictions
             if not all(k in self.restrictions for k in new_restrictions):
                 return False
-
-            # Update only valid restrictions
             self.restrictions.update(new_restrictions)
+            self.metadata["last_updated"] = datetime.now()
             return True
-
         except Exception as e:
             logger.error(f"Failed to update restrictions: {str(e)}")
             return False
 
     def get_metrics(self) -> Dict:
-        """
-        Get the comprehensive metrics of the contract's performance.
-
-        Returns:
-            Dict: Metrics of the smart contract.
-        """
+        """Get comprehensive contract metrics."""
         return {
             "contract_id": self.contract_id,
             "version": self.version,
@@ -7098,12 +7930,7 @@ class SmartContract:
         }
 
     def to_dict(self) -> Dict:
-        """
-        Convert the smart contract to a dictionary format.
-
-        Returns:
-            Dict: The dictionary representation of the contract.
-        """
+        """Convert contract to dictionary representation."""
         return {
             "contract_id": self.contract_id,
             "code": self.code,
@@ -7114,6 +7941,7 @@ class SmartContract:
             "metadata": {
                 **self.metadata,
                 "created_at": self.metadata["created_at"].isoformat(),
+                "last_updated": self.metadata["last_updated"].isoformat(),
                 "tags": list(self.metadata["tags"]),
             },
             "dependencies": list(self.dependencies),
@@ -7124,15 +7952,7 @@ class SmartContract:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "SmartContract":
-        """
-        Create a SmartContract instance from a dictionary.
-
-        Args:
-            data (Dict): The dictionary containing contract data.
-
-        Returns:
-            SmartContract: The created SmartContract instance.
-        """
+        """Create contract instance from dictionary data."""
         contract = cls(
             contract_id=data["contract_id"],
             code=data["code"],
@@ -7145,6 +7965,7 @@ class SmartContract:
         contract.metadata = {
             **data["metadata"],
             "created_at": datetime.fromisoformat(data["metadata"]["created_at"]),
+            "last_updated": datetime.fromisoformat(data["metadata"]["last_updated"]),
             "tags": set(data["metadata"]["tags"]),
         }
         contract.dependencies = set(data["dependencies"])
@@ -7154,20 +7975,13 @@ class SmartContract:
         return contract
 
     def __str__(self) -> str:
-        """
-        Return a human-readable string representation of the contract.
-
-        Returns:
-            str: The string representation of the contract.
-        """
+        """Human-readable string representation."""
         return (
             f"Contract(id={self.contract_id}, "
             f"creator={self.creator}, "
             f"executions={self.execution_count}, "
             f"mana_cost={self.mana_cost})"
         )
-        
-
 
 # ==================== /home/matt/icn-prototype/blockchain/contracts/__init__.py ====================
 
@@ -7190,7 +8004,7 @@ __all__ = ["SmartContract", "ContractExecutor"]
 # ================================================================
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple, Set, Any
 from datetime import datetime, timedelta
 import math
 import random
@@ -7203,25 +8017,26 @@ logger = logging.getLogger(__name__)
 class ProofOfCooperation:
     """
     Implements the Proof of Cooperation consensus mechanism for the ICN.
-
-    PoC is designed to prioritize cooperative behavior, community engagement,
-    and equitable contribution, placing less emphasis on computational power
-    or financial stake. It incorporates factors like reputation, diversity of
-    interactions, performance metrics, and collusion detection to select validators.
+    
+    The PoC mechanism prioritizes cooperative behavior and equitable participation
+    over raw computational power or stake. It incorporates multiple factors to
+    evaluate and select validators:
+    
+    - Reputation scores across different categories
+    - Diversity of cooperative interactions
+    - Historical consistency and reliability
+    - Performance metrics and resource contribution
+    - Shard-specific expertise
     """
 
     def __init__(self, min_reputation: float = 10.0, cooldown_blocks: int = 3):
-        """
-        Initialize the Proof of Cooperation mechanism.
-
-        Args:
-            min_reputation (float): Minimum reputation required to participate as a validator.
-            cooldown_blocks (int): Number of blocks a validator must wait before re-validating.
-        """
+        """Initialize the Proof of Cooperation mechanism."""
         self.min_reputation = min_reputation
         self.cooldown_blocks = cooldown_blocks
         self.cooperation_scores: Dict[str, float] = {}
-        self.reputation_weights: Dict[str, float] = {
+        
+        # Weights for different reputation categories
+        self.reputation_weights = {
             "cooperative_growth": 1.5,
             "proposal_participation": 1.2,
             "transaction_validation": 1.0,
@@ -7233,68 +8048,104 @@ class ProofOfCooperation:
             "network_stability": 1.1,
             "data_availability": 1.2,
         }
-        self.validation_thresholds: Dict[str, float] = {
-            "min_participation": 0.1,
-            "min_success_rate": 0.8,
-            "min_availability": 0.95,
+        
+        # Progressive validation thresholds
+        self.validation_thresholds = {
+            "min_participation": 0.1,    # Base participation requirement
+            "min_success_rate": 0.5,     # Minimum success rate (lowered for accessibility)
+            "min_availability": 0.7,     # Minimum availability (lowered)
             "max_consecutive_validations": 3,
+            "new_node_reputation_factor": 0.5,  # Multiplier for new node requirements
         }
+        
+        # System parameters
         self.reputation_decay_factor = 0.99
-        self.collusion_threshold = 0.8
+        self.collusion_threshold = 0.7  # Lowered for better detection
+        self.min_interactions_for_collusion = 5  # Lowered minimum interactions
         self.validator_history: List[Tuple[str, datetime, int]] = []
-        self.validation_stats: Dict[str, Dict] = {}
-        self.performance_metrics: Dict[str, float] = {
+        self.validation_stats: Dict[str, Dict[str, Any]] = {}
+        
+        # Performance metrics
+        self.performance_metrics = {
             "average_block_time": 0.0,
             "total_validations": 0,
             "successful_validations": 0,
             "collusion_detections": 0,
+            "failed_validations": 0,
+            "total_blocks_validated": 0,
         }
 
-    def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
-        """
-        Calculate a node's cooperation score based on reputation, diversity,
-        performance, and shard-specific factors.
-
-        Args:
-            node (Node): Node object representing the validator.
-            shard_id (Optional[int]): Shard ID for context, if applicable.
-
-        Returns:
-            float: The calculated cooperation score for the node.
-        """
-        if not node.can_validate(shard_id):
-            return 0.0
-
+    def _can_participate(self, node: Node, shard_id: Optional[int] = None) -> bool:
+        """Check if a node can participate in consensus."""
         try:
+            # Basic validation check
+            if not node.can_validate(shard_id):
+                logger.debug(f"Node {node.node_id} failed basic validation check")
+                return False
+
+            # Progressive entry for new nodes
+            is_new_node = node.total_validations < 10
+            reputation_requirement = (
+                self.min_reputation * self.validation_thresholds["new_node_reputation_factor"]
+                if is_new_node else
+                self.min_reputation
+            )
+
+            if node.get_total_reputation() < reputation_requirement:
+                logger.debug(f"Node {node.node_id} has insufficient reputation")
+                return False
+
+            # Check shard assignment if specified
+            if shard_id is not None and shard_id not in node.active_shards:
+                logger.debug(f"Node {node.node_id} not assigned to shard {shard_id}")
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error checking participation eligibility: {e}")
+            return False
+
+    def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
+        """Calculate a node's cooperation score."""
+        try:
+            if not self._can_participate(node, shard_id):
+                return 0.0
+
+            # Base score calculation
             base_score = sum(
                 score * self.reputation_weights.get(category, 1.0)
                 for category, score in node.reputation_scores.items()
             )
 
+            # Calculate modifying factors
             diversity_factor = self._calculate_diversity_factor(node)
             consistency_factor = self._calculate_consistency_factor(node)
             performance_factor = self._calculate_performance_factor(node)
             shard_factor = self._calculate_shard_factor(node, shard_id) if shard_id else 1.0
 
-            final_score = base_score * diversity_factor * consistency_factor * performance_factor * shard_factor
+            # Combined score
+            final_score = (base_score * 
+                         diversity_factor * 
+                         consistency_factor * 
+                         performance_factor * 
+                         shard_factor)
 
-            logger.info(f"Node {node.node_id} cooperation score: {final_score}")
-            return max(0, final_score)
+            # Apply time-based decay
+            last_active = self._get_time_since_last_validation(node)
+            if last_active > timedelta(hours=24):
+                decay = math.exp(-last_active.total_seconds() / (24 * 3600))
+                final_score *= decay
+
+            logger.debug(f"Node {node.node_id} cooperation score: {final_score:.2f}")
+            return max(0.0, final_score)
 
         except Exception as e:
-            logger.error(f"Failed to calculate cooperation score: {str(e)}")
+            logger.error(f"Error calculating cooperation score: {e}")
             return 0.0
 
     def _calculate_diversity_factor(self, node: Node) -> float:
-        """
-        Calculate diversity factor based on the node's cooperative interactions.
-
-        Args:
-            node (Node): Node object representing the validator.
-
-        Returns:
-            float: The calculated diversity factor for the node.
-        """
+        """Calculate diversity factor based on cooperative interactions."""
         try:
             recent_interactions = node.cooperative_interactions[-100:]
             if not recent_interactions:
@@ -7302,119 +8153,148 @@ class ProofOfCooperation:
 
             unique_coops = len(set(recent_interactions))
             total_interactions = len(recent_interactions)
-
+            
+            # Calculate base diversity score
             diversity_score = unique_coops / total_interactions
-            normalized_score = 1.0 + math.log(diversity_score + 1)
+            
+            # Apply progressive scaling
+            if total_interactions >= 20 and unique_coops >= 3:
+                normalized_score = 1.0 + math.log(1 + diversity_score) * 1.2
+            else:
+                normalized_score = 1.0 + math.log(1 + diversity_score)
 
             return max(self.validation_thresholds["min_participation"], normalized_score)
 
         except Exception as e:
-            logger.error(f"Failed to calculate diversity factor: {str(e)}")
+            logger.error(f"Error calculating diversity factor: {e}")
             return self.validation_thresholds["min_participation"]
 
     def _calculate_consistency_factor(self, node: Node) -> float:
-        """
-        Calculate consistency factor based on the node's validation history.
-
-        Args:
-            node (Node): Node object representing the validator.
-
-        Returns:
-            float: The calculated consistency factor for the node.
-        """
+        """Calculate consistency factor based on validation history."""
         try:
             if not node.validation_history:
                 return 1.0
 
             recent_validations = node.validation_history[-50:]
-            successful = sum(1 for v in recent_validations if v.get("evidence", {}).get("success", False))
-
+            successful = sum(1 for v in recent_validations 
+                           if v.get("evidence", {}).get("success", False))
+            
             success_rate = successful / len(recent_validations)
-            return max(self.validation_thresholds["min_success_rate"], success_rate)
+            min_rate = self.validation_thresholds["min_success_rate"]
+            
+            # Progressive scaling
+            if success_rate > 0.9:  # Exceptional performance
+                return 1.5
+            elif success_rate > min_rate:
+                return 1.0 + ((success_rate - min_rate) / (1 - min_rate))
+            else:
+                return max(0.5, success_rate / min_rate)
 
         except Exception as e:
-            logger.error(f"Failed to calculate consistency factor: {str(e)}")
+            logger.error(f"Error calculating consistency factor: {e}")
             return self.validation_thresholds["min_success_rate"]
 
     def _calculate_performance_factor(self, node: Node) -> float:
-        """
-        Calculate performance factor based on node's metrics.
-
-        Args:
-            node (Node): Node object representing the validator.
-
-        Returns:
-            float: The calculated performance factor for the node.
-        """
+        """Calculate performance factor based on node metrics."""
         try:
             metrics = node.performance_metrics
             if not metrics:
                 return 1.0
 
-            factors = [
-                metrics.get("availability", 0) / 100,
-                metrics.get("validation_success_rate", 0) / 100,
-                metrics.get("network_reliability", 0) / 100,
-            ]
+            # Weighted average of metrics
+            weights = {
+                "availability": 0.4,
+                "validation_success_rate": 0.4,
+                "network_reliability": 0.2
+            }
+            
+            weighted_sum = sum(
+                (metrics.get(metric, 0) / 100) * weight
+                for metric, weight in weights.items()
+            )
+            
+            # Apply bonus for high performance
+            if weighted_sum > 0.95:
+                weighted_sum *= 1.1
 
-            avg_performance = sum(factors) / len(factors)
-            return max(self.validation_thresholds["min_availability"], avg_performance)
+            return max(self.validation_thresholds["min_availability"], weighted_sum)
 
         except Exception as e:
-            logger.error(f"Failed to calculate performance factor: {str(e)}")
+            logger.error(f"Error calculating performance factor: {e}")
             return self.validation_thresholds["min_availability"]
 
     def _calculate_shard_factor(self, node: Node, shard_id: int) -> float:
-        """
-        Calculate shard-specific factor based on the node's experience in the shard.
-
-        Args:
-            node (Node): Node object representing the validator.
-            shard_id (int): ID of the shard.
-
-        Returns:
-            float: The calculated shard-specific factor.
-        """
+        """Calculate shard-specific performance factor."""
         try:
             if shard_id not in node.active_shards:
                 return 0.0
 
+            # Calculate experience from time in shard
             time_in_shard = (datetime.now() - node.active_shards[shard_id]).total_seconds()
-            shard_experience = min(1.0, time_in_shard / (24 * 3600))
-
-            return 0.5 + (0.5 * shard_experience)
+            base_experience = min(1.0, time_in_shard / (24 * 3600))
+            
+            # Get shard-specific success rate
+            shard_stats = (
+                self.validation_stats.get(node.node_id, {})
+                .get("shard_validations", {})
+                .get(shard_id, {})
+            )
+            success_rate = (
+                shard_stats.get("successful", 0) /
+                max(1, shard_stats.get("selections", 1))
+            )
+            
+            # Combine factors
+            return 0.5 + (0.3 * base_experience) + (0.2 * success_rate)
 
         except Exception as e:
-            logger.error(f"Failed to calculate shard factor: {str(e)}")
+            logger.error(f"Error calculating shard factor: {e}")
             return 0.0
 
+    def _get_time_since_last_validation(self, node: Node) -> timedelta:
+        """Get time since node's last validation."""
+        stats = self.validation_stats.get(node.node_id, {})
+        last_validation = stats.get("last_validation")
+        if not last_validation:
+            return timedelta(hours=1)  # Default for new nodes
+        return datetime.now() - last_validation
+
     def select_validator(self, nodes: List[Node], shard_id: Optional[int] = None) -> Optional[Node]:
-        """
-        Select the next validator using a weighted random selection based on cooperation scores.
-
-        Args:
-            nodes (List[Node]): List of candidate nodes.
-            shard_id (Optional[int]): Shard ID for context, if applicable.
-
-        Returns:
-            Optional[Node]: The selected validator node or None if no valid candidate exists.
-        """
+        """Select the next validator using weighted random selection."""
         try:
-            eligible_nodes = [node for node in nodes if self._is_eligible_validator(node, shard_id)]
+            # Get eligible nodes with progressive criteria
+            eligible_nodes = [
+                node for node in nodes
+                if self._can_participate(node, shard_id)
+            ]
 
             if not eligible_nodes:
                 logger.warning("No eligible validators available")
                 return None
 
-            scores = [self.calculate_cooperation_score(node, shard_id) for node in eligible_nodes]
+            # Calculate scores
+            scores = [
+                self.calculate_cooperation_score(node, shard_id)
+                for node in eligible_nodes
+            ]
             total_score = sum(scores)
 
+            # Select validator
             if total_score <= 0:
-                logger.warning("No nodes with positive cooperation scores")
-                selected = random.choice(eligible_nodes)
+                # Fallback selection for new nodes
+                new_nodes = [
+                    node for node in eligible_nodes
+                    if node.total_validations < 10
+                ]
+                if new_nodes:
+                    selected = random.choice(new_nodes)
+                else:
+                    return None
             else:
+                # Weighted random selection
                 selection_point = random.uniform(0, total_score)
                 current_sum = 0
+                selected = eligible_nodes[-1]
 
                 for node, score in zip(eligible_nodes, scores):
                     current_sum += score
@@ -7422,6 +8302,7 @@ class ProofOfCooperation:
                         selected = node
                         break
 
+            # Record selection and apply cooldown
             self._record_validator_selection(selected, shard_id)
             selected.enter_cooldown(self.cooldown_blocks)
 
@@ -7429,50 +8310,11 @@ class ProofOfCooperation:
             return selected
 
         except Exception as e:
-            logger.error(f"Failed to select validator: {str(e)}")
+            logger.error(f"Error selecting validator: {e}")
             return None
 
-    def _is_eligible_validator(self, node: Node, shard_id: Optional[int] = None) -> bool:
-        """
-        Check if a node is eligible to validate blocks based on criteria like reputation,
-        performance, and cooldown.
-
-        Args:
-            node (Node): Node object representing the validator.
-            shard_id (Optional[int]): Shard ID for context, if applicable.
-
-        Returns:
-            bool: True if the node is eligible, False otherwise.
-        """
-        try:
-            if not node.can_validate(shard_id):
-                return False
-
-            if node.get_total_reputation() < self.min_reputation:
-                return False
-
-            performance_factor = self._calculate_performance_factor(node)
-            if performance_factor < self.validation_thresholds["min_availability"]:
-                return False
-
-            recent_validations = [v[0] for v in self.validator_history[-10:] if v[0] == node.node_id]
-            if len(recent_validations) >= self.validation_thresholds["max_consecutive_validations"]:
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to check validator eligibility: {str(e)}")
-            return False
-
     def _record_validator_selection(self, node: Node, shard_id: Optional[int]) -> None:
-        """
-        Record validator selection and update selection history.
-
-        Args:
-            node (Node): The selected validator node.
-            shard_id (Optional[int]): The shard ID for the validation, if applicable.
-        """
+        """Record validator selection and update history."""
         try:
             self.validator_history.append((node.node_id, datetime.now(), shard_id))
             if len(self.validator_history) > 1000:
@@ -7482,13 +8324,13 @@ class ProofOfCooperation:
                 self.validation_stats[node.node_id] = {
                     "selections": 0,
                     "successful_validations": 0,
-                    "last_selected": None,
-                    "shard_validations": {},
+                    "last_validation": None,
+                    "shard_validations": {}
                 }
 
             stats = self.validation_stats[node.node_id]
             stats["selections"] += 1
-            stats["last_selected"] = datetime.now()
+            stats["last_validation"] = datetime.now()
 
             if shard_id is not None:
                 shard_stats = stats["shard_validations"].setdefault(
@@ -7497,89 +8339,160 @@ class ProofOfCooperation:
                 shard_stats["selections"] += 1
 
         except Exception as e:
-            logger.error(f"Failed to record validator selection: {str(e)}")
+            logger.error(f"Error recording validator selection: {e}")
 
     def validate_block(self, block: Block, previous_block: Optional[Block], validator: Node) -> bool:
-        """
-        Validate a proposed block based on validator eligibility and block integrity.
-
-        Args:
-            block (Block): The block to be validated.
-            previous_block (Optional[Block]): The previous block in the chain for context.
-            validator (Node): The node proposing the block.
-
-        Returns:
-            bool: True if the block is valid, False otherwise.
-        """
+        """Validate a proposed block."""
         try:
-            if not self._is_eligible_validator(validator, block.shard_id):
-                logger.error("Validator not eligible")
+            # Check validator eligibility
+            if not self._can_validate_block(validator, block.shard_id):
+                logger.error(f"Validator {validator.node_id} not eligible for block validation")
                 return False
 
+            # Validate block integrity
             if not block.validate(previous_block):
-                logger.error("Block validation failed")
+                logger.error(f"Block {block.index} failed integrity validation")
+                self.performance_metrics["failed_validations"] += 1
                 return False
 
+            # Check for collusion
+            if self.detect_collusion(validator, block):
+                logger.warning(f"Potential collusion detected in block {block.index}")
+                self.performance_metrics["collusion_detections"] += 1
+                return False
+
+            # Update metrics
+            self.performance_metrics["total_blocks_validated"] += 1
+            self.performance_metrics["successful_validations"] += 1
+            
+            # Update validation statistics
             self._update_validation_stats(validator, block, True)
+            
+            logger.info(f"Block {block.index} validated successfully")
             return True
 
         except Exception as e:
-            logger.error(f"Block validation failed: {str(e)}")
+            logger.error(f"Error validating block: {e}")
             self._update_validation_stats(validator, block, False)
             return False
 
-    def detect_collusion(self, validator: Node, block: Block) -> bool:
-        """
-        Detect potential collusion by analyzing recent transaction patterns.
-
-        Args:
-            validator (Node): The node performing the validation.
-            block (Block): The block being validated.
-
-        Returns:
-            bool: True if potential collusion is detected, False otherwise.
-        """
+    def _can_validate_block(self, validator: Node, shard_id: Optional[int]) -> bool:
+        """Check if a validator can validate a specific block."""
         try:
-            recent_validations = validator.validation_history[-20:]
-            interaction_counts: Dict[str, int] = {}
+            # Allow new nodes with reduced requirements
+            if validator.total_validations < 5:
+                return validator.can_validate(shard_id)
 
-            for validation in recent_validations:
-                for tx in block.transactions:
-                    interaction_counts[tx.sender] = interaction_counts.get(tx.sender, 0) + 1
-                    interaction_counts[tx.receiver] = interaction_counts.get(tx.receiver, 0) + 1
+            # Regular validation checks
+            if not validator.can_validate(shard_id):
+                return False
 
-            max_interactions = max(interaction_counts.values(), default=0)
-            if max_interactions / len(recent_validations) > self.collusion_threshold:
-                logger.warning(f"Potential collusion detected for validator {validator.node_id}")
-                self.performance_metrics["collusion_detections"] += 1
+            reputation = validator.get_total_reputation()
+            min_rep = self.min_reputation * 0.7  # 30% tolerance
+            return reputation >= min_rep
+
+        except Exception as e:
+            logger.error(f"Error checking block validation eligibility: {e}")
+            return False
+
+    def detect_collusion(self, validator: Node, block: Block) -> bool:
+        """Detect potential collusion in transaction patterns."""
+        try:
+            if len(block.transactions) < 3:  # Skip small blocks
+                return False
+
+            # Build interaction count map
+            sender_counts: Dict[str, int] = {}
+            receiver_counts: Dict[str, int] = {}
+            
+            # Count transaction patterns
+            total_transactions = len(block.transactions)
+            for tx in block.transactions:
+                sender_counts[tx.sender] = sender_counts.get(tx.sender, 0) + 1
+                receiver_counts[tx.receiver] = receiver_counts.get(tx.receiver, 0) + 1
+
+            # Calculate concentration metrics
+            max_sender_concentration = max(sender_counts.values()) / total_transactions
+            max_receiver_concentration = max(receiver_counts.values()) / total_transactions
+            
+            # Dynamic threshold based on block size
+            threshold = self.collusion_threshold
+            if total_transactions > 10:
+                threshold *= 0.9  # Stricter for larger blocks
+            
+            # Check for concentration patterns
+            if max_sender_concentration > threshold or max_receiver_concentration > threshold:
+                logger.warning(
+                    f"Collusion detected - Sender conc: {max_sender_concentration:.2f}, "
+                    f"Receiver conc: {max_receiver_concentration:.2f}"
+                )
                 return True
 
             return False
 
         except Exception as e:
-            logger.error(f"Failed to detect collusion: {str(e)}")
+            logger.error(f"Error detecting collusion: {e}")
             return False
 
-    def get_metrics(self) -> Dict:
-        """
-        Get metrics for the consensus mechanism, including validation success rates,
-        average block time, and collusion detections.
-
-        Returns:
-            Dict: Dictionary containing consensus metrics.
-        """
+    def _update_validation_stats(self, validator: Node, block: Block, success: bool) -> None:
+        """Update validation statistics."""
         try:
+            if validator.node_id not in self.validation_stats:
+                self.validation_stats[validator.node_id] = {
+                    "selections": 0,
+                    "successful_validations": 0,
+                    "last_validation": None,
+                    "shard_validations": {}
+                }
+
+            stats = self.validation_stats[validator.node_id]
+            stats["selections"] += 1
+            if success:
+                stats["successful_validations"] += 1
+            stats["last_validation"] = datetime.now()
+
+            # Update shard-specific stats
+            if block.shard_id is not None:
+                shard_stats = stats["shard_validations"].setdefault(
+                    block.shard_id, {"selections": 0, "successful": 0}
+                )
+                shard_stats["selections"] += 1
+                if success:
+                    shard_stats["successful"] += 1
+
+            # Update system metrics
+            self.performance_metrics["total_validations"] += 1
+            if success:
+                self.performance_metrics["successful_validations"] += 1
+            else:
+                self.performance_metrics["failed_validations"] += 1
+
+        except Exception as e:
+            logger.error(f"Error updating validation stats: {e}")
+
+    def get_metrics(self) -> Dict:
+        """Get comprehensive consensus metrics."""
+        try:
+            total_validations = self.performance_metrics["total_validations"]
+            success_rate = (
+                self.performance_metrics["successful_validations"] / total_validations
+                if total_validations > 0 else 0
+            )
+            
             return {
                 "active_validators": len(self.validation_stats),
-                "total_validations": self.performance_metrics["total_validations"],
+                "total_validations": total_validations,
                 "successful_validations": self.performance_metrics["successful_validations"],
+                "success_rate": success_rate,
                 "average_block_time": self.performance_metrics["average_block_time"],
                 "collusion_detections": self.performance_metrics["collusion_detections"],
+                "failed_validations": self.performance_metrics["failed_validations"],
+                "total_blocks_validated": self.performance_metrics["total_blocks_validated"]
             }
+            
         except Exception as e:
-            logger.error(f"Failed to get metrics: {str(e)}")
+            logger.error(f"Error getting metrics: {e}")
             return {}
-
 
 # ==================== /home/matt/icn-prototype/blockchain/consensus/__init__.py ====================
 

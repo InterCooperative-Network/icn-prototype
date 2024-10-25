@@ -3,11 +3,11 @@
 from typing import Dict, List, Optional, Set
 import logging
 from datetime import datetime
-from .types import ShardConfig, ShardMetrics
+from .shard_types import ShardConfig, ShardMetrics
 from .transaction_manager import TransactionManager
 from .state_manager import StateManager
-from .validation import ValidationManager
-from .cross_shard import CrossShardManager
+from .validation_manager import ValidationManager
+from .cross_shard_manager import CrossShardManager
 from ..block import Block
 from ..transaction import Transaction
 
@@ -71,14 +71,6 @@ class Shard:
         Returns:
             bool: True if transaction was added successfully
         """
-        # Validate transaction
-        if not self.validation_manager.validate_transaction(transaction):
-            return False
-            
-        # Check for cross-shard implications
-        cross_shard_ref = self.cross_shard_manager.process_transaction(transaction)
-        
-        # Add to transaction pool
         return self.transaction_manager.add_transaction(transaction)
 
     def create_block(self, validator: str) -> Optional[Block]:
@@ -91,24 +83,20 @@ class Shard:
         Returns:
             Optional[Block]: New block if created successfully
         """
-        # Select transactions
         transactions = self.transaction_manager.select_transactions_for_block()
         if not transactions:
             return None
 
-        # Create block
         block = Block(
             index=self.height,
-            previous_hash=self.chain[-1].hash,
+            previous_hash=self.chain[-1].hash if self.chain else "0" * 64,
             timestamp=datetime.now(),
             transactions=transactions,
             validator=validator,
             shard_id=self.shard_id
         )
 
-        # Add cross-shard references
         self.cross_shard_manager.update_references(block)
-        
         return block
 
     def add_block(self, block: Block) -> bool:
@@ -122,7 +110,7 @@ class Shard:
             bool: True if block was added successfully
         """
         # Validate block
-        if not self.validation_manager.validate_block(block, self.chain[-1]):
+        if not self.validation_manager.validate_block(block, self.chain[-1] if self.chain else None):
             return False
 
         # Update state
@@ -147,18 +135,38 @@ class Shard:
         Returns:
             bool: True if chain is valid
         """
-        return self.validation_manager.validate_chain_sequence(self.chain)
+        if not self.chain:
+            return True
+
+        for i in range(1, len(self.chain)):
+            if not self.validation_manager.validate_block(self.chain[i], self.chain[i-1]):
+                return False
+
+        return True
 
     def get_metrics(self) -> Dict:
         """Get comprehensive shard metrics."""
-        return {
+        metrics = {
             "shard_id": self.shard_id,
             "height": self.height,
             "chain_size": len(self.chain),
-            "known_validators": len(self.known_validators),
-            **self.state_manager.get_metrics(),
-            **self.cross_shard_manager.get_metrics()
+            "known_validators": len(self.known_validators)
         }
+
+        # Get metrics from each manager
+        metrics.update(self.state_manager.get_metrics())
+        metrics.update(self.transaction_manager.get_metrics())
+        
+        # Get cross-shard metrics
+        cross_shard_metrics = self.cross_shard_manager.get_metrics()
+        metrics.update({
+            "pending_validations": cross_shard_metrics["pending_validations"],
+            "validated_refs": len(cross_shard_metrics.get("validated_refs", set())),
+            "cross_shard_operations": cross_shard_metrics.get("cross_shard_operations", 0),
+            "refs_by_shard": cross_shard_metrics.get("refs_by_shard", {})
+        })
+
+        return metrics
 
     def to_dict(self) -> Dict:
         """Convert shard state to dictionary format."""
@@ -176,7 +184,6 @@ class Shard:
     @classmethod
     def from_dict(cls, data: Dict) -> 'Shard':
         """Create shard from dictionary data."""
-        # Create shard instance
         config = ShardConfig.from_dict(data["config"])
         shard = cls(data["shard_id"], config)
         
@@ -187,13 +194,19 @@ class Shard:
         
         # Restore managers
         shard.transaction_manager = TransactionManager.from_dict(
-            data["transaction_manager"], shard.shard_id, config
+            data["transaction_manager"],
+            shard.shard_id,
+            config
         )
         shard.state_manager = StateManager.from_dict(
-            data["state_manager"], shard.shard_id, config
+            data["state_manager"],
+            shard.shard_id,
+            config
         )
         shard.cross_shard_manager = CrossShardManager.from_dict(
-            data["cross_shard_manager"], shard.shard_id, config
+            data["cross_shard_manager"],
+            shard.shard_id,
+            config
         )
         
         return shard

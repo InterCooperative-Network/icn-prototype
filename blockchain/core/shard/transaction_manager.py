@@ -3,7 +3,7 @@
 from typing import List, Optional, Dict, Set
 import logging
 from datetime import datetime, timedelta
-from .types import ShardMetrics, ShardConfig
+from .shard_types import ShardMetrics, ShardConfig
 from ..transaction import Transaction
 
 logger = logging.getLogger(__name__)

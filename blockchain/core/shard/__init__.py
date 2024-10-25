@@ -1,7 +1,7 @@
 # blockchain/core/shard/__init__.py
 
 from .base import Shard
-from .types import ShardConfig, ShardMetrics, CrossShardRef
+from .shard_types import ShardConfig, ShardMetrics, CrossShardRef
 from .transaction_manager import TransactionManager
 from .state_manager import StateManager
 from .validation import ValidationManager

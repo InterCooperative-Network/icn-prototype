@@ -1,11 +1,11 @@
-# blockchain/core/shard/validation.py
+# blockchain/core/shard/validation_manager.py
 
 from typing import Dict, Optional, List
 import logging
 from datetime import datetime, timedelta
-from .types import ShardMetrics, ShardConfig
-from ..transaction import Transaction
+from .shard_types import ShardMetrics, ShardConfig
 from ..block import Block
+from ..transaction import Transaction
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +39,21 @@ class ValidationManager:
             if not transaction.validate():
                 logger.error(f"Transaction {tx_id} failed basic validation")
                 self.validation_cache[tx_id] = False
+                self.metrics.validation_failures += 1
                 return False
 
             # Validate shard assignment
             if transaction.shard_id != self.shard_id:
                 logger.error(f"Transaction {tx_id} has incorrect shard_id")
                 self.validation_cache[tx_id] = False
+                self.metrics.validation_failures += 1
                 return False
 
             # Validate timestamp
             if transaction.timestamp > datetime.now() + timedelta(minutes=5):
                 logger.error(f"Transaction {tx_id} has future timestamp")
                 self.validation_cache[tx_id] = False
+                self.metrics.validation_failures += 1
                 return False
 
             # Cache and return result
@@ -60,6 +63,7 @@ class ValidationManager:
 
         except Exception as e:
             logger.error(f"Transaction validation failed: {str(e)}")
+            self.metrics.validation_failures += 1
             return False
 
     def validate_block(self, block: Block, previous_block: Optional[Block] = None) -> bool:
@@ -74,30 +78,36 @@ class ValidationManager:
             bool: True if block is valid
         """
         try:
-            # Validate block structure
+            # Basic block validation
             if not block.validate(previous_block):
-                logger.error("Block failed structural validation")
+                logger.error("Block failed basic validation")
+                self.metrics.validation_failures += 1
                 return False
 
             # Validate shard assignment
             if block.shard_id != self.shard_id:
                 logger.error(f"Block has incorrect shard_id: {block.shard_id}")
+                self.metrics.validation_failures += 1
                 return False
 
             # Validate transactions
             if not self._validate_block_transactions(block):
+                self.metrics.validation_failures += 1
                 return False
 
             # Validate block size
             block_size = len(str(block.to_dict()))
             if block_size > self.config.max_block_size:
                 logger.error(f"Block size {block_size} exceeds limit")
+                self.metrics.validation_failures += 1
                 return False
 
+            self.metrics.successful_blocks += 1
             return True
 
         except Exception as e:
             logger.error(f"Block validation failed: {str(e)}")
+            self.metrics.validation_failures += 1
             return False
 
     def _validate_block_transactions(self, block: Block) -> bool:
@@ -170,7 +180,7 @@ class ValidationManager:
             logger.error(f"Chain sequence validation failed: {str(e)}")
             return False
 
-    def clear_old_validations(self, max_age_minutes: int = 60) -> None:
+    def clear_validation_cache(self, max_age_minutes: int = 60) -> None:
         """
         Clear old validation cache entries.
         
@@ -196,4 +206,34 @@ class ValidationManager:
             }
 
         except Exception as e:
-            logger.error(f"Failed to clear old validations: {str(e)}")
+            logger.error(f"Failed to clear validation cache: {str(e)}")
+
+    def get_metrics(self) -> Dict:
+        """Get validation metrics."""
+        return {
+            "validation_failures": self.metrics.validation_failures,
+            "successful_blocks": self.metrics.successful_blocks
+        }
+
+    def to_dict(self) -> Dict:
+        """Convert manager state to dictionary format."""
+        return {
+            "validation_cache": self.validation_cache,
+            "metrics": self.metrics.to_dict(),
+            "last_validation_time": {
+                tx_id: timestamp.isoformat()
+                for tx_id, timestamp in self.last_validation_time.items()
+            }
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict, shard_id: int, config: ShardConfig) -> 'ValidationManager':
+        """Create manager from dictionary data."""
+        manager = cls(shard_id, config)
+        manager.validation_cache = data["validation_cache"]
+        manager.metrics = ShardMetrics.from_dict(data["metrics"])
+        manager.last_validation_time = {
+            tx_id: datetime.fromisoformat(timestamp)
+            for tx_id, timestamp in data["last_validation_time"].items()
+        }
+        return manager

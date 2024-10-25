@@ -1,16 +1,16 @@
-# blockchain/core/shard/cross_shard.py
+# blockchain/core/shard/cross_shard_manager.py
 
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Optional, Set
 import logging
 from datetime import datetime, timedelta
-from .types import ShardConfig, ShardMetrics, CrossShardRef
-from ..transaction import Transaction
+from .shard_types import ShardConfig, ShardMetrics, CrossShardRef
 from ..block import Block
+from ..transaction import Transaction
 
 logger = logging.getLogger(__name__)
 
 class CrossShardManager:
-    """Handles cross-shard operations and references."""
+    """Manages cross-shard operations and references."""
     
     def __init__(self, shard_id: int, config: ShardConfig):
         self.shard_id = shard_id
@@ -22,15 +22,7 @@ class CrossShardManager:
         self.last_cleanup = datetime.now()
 
     def process_transaction(self, transaction: Transaction) -> Optional[CrossShardRef]:
-        """
-        Process a transaction for cross-shard operations.
-        
-        Args:
-            transaction: Transaction to process
-            
-        Returns:
-            Optional[CrossShardRef]: Created cross-shard reference if applicable
-        """
+        """Process a transaction for cross-shard operations."""
         try:
             # Check if this is a cross-shard transaction
             target_shard = transaction.data.get('target_shard')
@@ -62,12 +54,7 @@ class CrossShardManager:
             return None
 
     def update_references(self, block: Block) -> None:
-        """
-        Update cross-shard references based on a new block.
-        
-        Args:
-            block: New block to process
-        """
+        """Update cross-shard references based on a new block."""
         try:
             for tx in block.transactions:
                 # Process new cross-shard references
@@ -82,15 +69,7 @@ class CrossShardManager:
             logger.error(f"Failed to update cross-shard references: {str(e)}")
 
     def validate_reference(self, ref_id: str) -> bool:
-        """
-        Validate a cross-shard reference.
-        
-        Args:
-            ref_id: ID of reference to validate
-            
-        Returns:
-            bool: True if validation was successful
-        """
+        """Validate a cross-shard reference."""
         try:
             if ref_id not in self.pending_validations:
                 return False
@@ -110,15 +89,7 @@ class CrossShardManager:
             return False
 
     def get_pending_validations(self, target_shard: Optional[int] = None) -> List[CrossShardRef]:
-        """
-        Get pending validations, optionally filtered by target shard.
-        
-        Args:
-            target_shard: Optional shard ID to filter by
-            
-        Returns:
-            List[CrossShardRef]: List of pending references
-        """
+        """Get pending validations, optionally filtered by target shard."""
         try:
             if target_shard is not None:
                 return [

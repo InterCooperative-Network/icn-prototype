@@ -1,8 +1,7 @@
-# blockchain/core/shard/types.py
-
+from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
 from datetime import datetime
+from typing import Dict, List, Optional, Set
 
 @dataclass
 class ShardMetrics:

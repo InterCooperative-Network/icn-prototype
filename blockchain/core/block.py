@@ -55,13 +55,20 @@ class Block:
         # Initialize transaction ID tracking
         self._transaction_ids = {tx.transaction_id for tx in self.transactions}
         
-        # Sort cross-shard references for consistency
-        self.cross_shard_refs = sorted(self.cross_shard_refs)
+        # Sort transactions by priority
+        self.transactions.sort(key=lambda tx: (-tx.priority, tx.timestamp))
         
-        # Ensure metadata contains creation time
+        # Process cross-shard references from transactions
+        self._process_cross_shard_refs()
+        
+        # Sort cross-shard references for consistency
+        self.cross_shard_refs = sorted(set(self.cross_shard_refs))
+        
+        # Ensure metadata contains creation time and cross-shard info
         if "created_at" not in self.metadata:
             self.metadata["created_at"] = datetime.now().isoformat()
-            
+        self.metadata["cross_shard_count"] = len(self.cross_shard_refs)
+        
         # Only calculate merkle root and hash if they're not provided
         if not self.merkle_root and not self._is_deserialized:
             self.merkle_root = self.calculate_merkle_root()
@@ -73,6 +80,18 @@ class Block:
         for tx in self.transactions:
             if tx.shard_id != self.shard_id:
                 logger.warning(f"Transaction {tx.transaction_id} shard_id doesn't match block")
+
+    def _process_cross_shard_refs(self) -> None:
+        """Process and collect cross-shard references from transactions."""
+        for tx in self.transactions:
+            # Add direct cross-shard references from transaction
+            if tx.cross_shard_refs:
+                self.cross_shard_refs.extend(tx.cross_shard_refs)
+            
+            # Add reference if transaction targets another shard
+            if 'target_shard' in tx.data and tx.data['target_shard'] != self.shard_id:
+                cross_ref = f"shard_{tx.data['target_shard']}_{tx.transaction_id}"
+                self.cross_shard_refs.append(cross_ref)
 
     def calculate_merkle_root(self) -> str:
         """Calculate the Merkle root of the transactions."""
@@ -152,6 +171,12 @@ class Block:
                     logger.error("Block timestamp is not after previous block")
                     return False
 
+            # Validate transaction ordering
+            for i in range(len(self.transactions) - 1):
+                if self.transactions[i].priority < self.transactions[i + 1].priority:
+                    logger.error("Transactions not properly ordered by priority")
+                    return False
+
             # Only validate merkle root and hash if not deserializing
             if not self._is_deserialized and self.merkle_root != self.calculate_merkle_root():
                 logger.error("Invalid merkle root")
@@ -187,6 +212,12 @@ class Block:
             self.transactions.append(transaction)
             self._transaction_ids.add(transaction.transaction_id)
 
+            # Process new cross-shard references
+            self._process_cross_shard_refs()
+
+            # Re-sort transactions by priority
+            self.transactions.sort(key=lambda tx: (-tx.priority, tx.timestamp))
+
             # Update block state
             self.merkle_root = self.calculate_merkle_root()
             self.hash = self.calculate_hash()
@@ -196,6 +227,22 @@ class Block:
         except Exception as e:
             logger.error(f"Failed to add transaction: {str(e)}")
             return False
+
+    def get_cross_shard_info(self) -> Dict:
+        """Get information about cross-shard interactions."""
+        target_shards = set()
+        ref_counts = {}
+        for tx in self.transactions:
+            if 'target_shard' in tx.data:
+                target_shards.add(tx.data['target_shard'])
+            for ref in tx.cross_shard_refs:
+                ref_counts[ref] = ref_counts.get(ref, 0) + 1
+                
+        return {
+            "target_shards": sorted(list(target_shards)),
+            "ref_counts": ref_counts,
+            "total_refs": len(self.cross_shard_refs)
+        }
 
     def to_dict(self) -> Dict:
         """Convert block to dictionary format."""
@@ -247,5 +294,6 @@ class Block:
             f"Block(index={self.index}, "
             f"hash={self.hash[:8]}..., "
             f"tx_count={len(self.transactions)}, "
-            f"shard={self.shard_id})"
+            f"shard={self.shard_id}, "
+            f"cross_refs={len(self.cross_shard_refs)})"
         )

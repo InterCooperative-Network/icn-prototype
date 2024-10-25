@@ -88,10 +88,13 @@ class ContractExecutor:
             contract: SmartContract instance to deploy
 
         Returns:
-            bool: True if deployment successful
-
-        Raises:
-            ContractExecutionError: If deployment fails due to dependency issues
+            bool: True if deployment successful, False otherwise
+        
+        The deployment process includes:
+        1. Code validation
+        2. Dependency checking
+        3. Security verification
+        4. Resource allocation
         """
         try:
             # Check for existing contract
@@ -103,9 +106,9 @@ class ContractExecutor:
             if not await self._validate_contract_code(contract.code):
                 return False
 
-            # Check dependencies - now raises ContractExecutionError
+            # Check dependencies
             if not await self._validate_dependencies(contract.dependencies):
-                raise ContractExecutionError("Invalid or missing dependencies")
+                return False
 
             # Store contract and update graph
             self.contracts[contract.contract_id] = contract
@@ -117,10 +120,6 @@ class ContractExecutor:
             
             logger.info(f"Successfully deployed contract {contract.contract_id}")
             return True
-
-        except ContractExecutionError:
-            self.metrics["failed_deployments"] += 1
-            raise
 
         except Exception as e:
             logger.error(f"Contract deployment failed: {str(e)}")
@@ -219,8 +218,6 @@ class ContractExecutor:
 
             except Exception as e:
                 await self._update_metrics(0, False)
-                if isinstance(e, ContractExecutionError):
-                    raise
                 raise ContractExecutionError(str(e))
 
     async def _validate_dependencies(self, dependencies: Set[str]) -> bool:
@@ -231,17 +228,13 @@ class ContractExecutor:
 
         Returns:
             bool: True if dependencies are valid
-
-        Raises:
-            ContractExecutionError: If dependencies are invalid or missing
         """
         try:
             # Check existence
             for dep in dependencies:
                 if dep not in self.contracts:
-                    msg = f"Dependency not found: {dep}"
-                    logger.error(msg)
-                    raise ContractExecutionError(msg)
+                    logger.error(f"Dependency not found: {dep}")
+                    return False
 
             # Check for cycles
             visited: Set[str] = set()
@@ -251,7 +244,7 @@ class ContractExecutor:
                 if contract_id in path:
                     cycle = ' -> '.join(path + [contract_id])
                     logger.error(f"Circular dependency detected: {cycle}")
-                    raise ContractExecutionError(f"Circular dependency: {cycle}")
+                    return False
 
                 if contract_id in visited:
                     return True
@@ -269,16 +262,13 @@ class ContractExecutor:
             # Check each dependency
             for dep in dependencies:
                 if not await check_cycle(dep):
-                    raise ContractExecutionError("Dependency cycle detected")
+                    return False
 
             return True
 
-        except ContractExecutionError:
-            raise
-
         except Exception as e:
             logger.error(f"Dependency validation failed: {str(e)}")
-            raise ContractExecutionError(f"Dependency validation failed: {str(e)}")
+            return False
 
     async def _update_metrics(self, execution_time: float, success: bool) -> None:
         """Update executor metrics.
@@ -347,11 +337,3 @@ class ContractExecutor:
         except Exception as e:
             logger.error(f"Failed to queue execution: {str(e)}")
             return False
-
-    def __str__(self) -> str:
-        """Return a human-readable string representation of the executor."""
-        return (
-            f"ContractExecutor(contracts={len(self.contracts)}, "
-            f"mana={self.mana_pool}, "
-            f"queue={len(self.execution_queue)})"
-        )

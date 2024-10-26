@@ -47,9 +47,9 @@
 # /home/matt/icn-prototype/blockchain/core/__init__.py - 299 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/shard/validation_manager.py - 6705 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/shard/transaction_manager.py - 5115 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/state_manager.py - 6583 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/state_manager.py - 7540 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/shard/shard_types.py - 3173 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/base.py - 8891 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/base.py - 12484 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/shard/cross_shard_manager.py - 7344 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/shard/__init__.py - 503 bytes - Included
 # /home/matt/icn-prototype/blockchain/contracts/contract_executor.py - 11587 bytes - Included
@@ -57,6 +57,14 @@
 # /home/matt/icn-prototype/blockchain/contracts/__init__.py - 207 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation.py - 27497 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/__init__.py - 159 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py - 9628 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py - 14712 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py - 0 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/types.py - 7904 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py - 0 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py - 0 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py - 0 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/__init__.py - 0 bytes - Included
 
 
 # Project Directory Structure (up to depth 3):
@@ -148,6 +156,15 @@ icn-prototype/
         consensus/
             proof_of_cooperation.py
             __init__.py
+            proof_of_cooperation/
+                metrics_manager.py
+                reputation_manager.py
+                validator_manager.py
+                types.py
+                collusion_detector.py
+                base.py
+                cooldown_manager.py
+                __init__.py
 
 
 # Code Files Concatenation:
@@ -10018,188 +10035,236 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/core/shard/state_manager.py
-# Size: 6583 bytes
-# Last Modified: Sat Oct 26 04:40:01 2024
+# Size: 7540 bytes
+# Last Modified: Sat Oct 26 13:59:14 2024
 # Language: py
 # ============================================================
 
 ```py
-    # blockchain/core/shard/state_manager.py
-    
-    from typing import Dict, Optional, List, Set
+    from typing import Dict, Optional, List, Set, Any
     import logging
     from datetime import datetime
     from copy import deepcopy
-    from .shard_types import ShardMetrics, ShardConfig
-    from ..block import Block
+    from .shard_types import ShardConfig, ShardMetrics
     from ..transaction import Transaction
+    from ..block import Block
     
     logger = logging.getLogger(__name__)
     
     class StateManager:
-        """Manages shard state and state transitions."""
+        """
+        Manages state and state transitions within a shard.
         
+        This class handles:
+        - State updates from transactions and blocks
+        - State validation and consistency checks
+        - State snapshots and rollbacks
+        - State metrics tracking
+        """
+    
         def __init__(self, shard_id: int, config: ShardConfig):
-            """Initialize the state manager."""
+            """
+            Initialize the state manager.
+            
+            Args:
+                shard_id: ID of the shard this manager belongs to
+                config: Configuration parameters
+            """
             self.shard_id = shard_id
             self.config = config
-            self.state: Dict = {
+            self.state: Dict[str, Any] = {
                 "balances": {},
                 "metadata": {
                     "shard_id": shard_id,
                     "created_at": datetime.now().isoformat(),
                     "last_updated": datetime.now().isoformat(),
                     "total_transactions": 0,
-                    "total_volume": 0.0
+                    "total_volume": 0.0,
+                    "version": "1.0"
                 }
             }
+            self._state_snapshots: List[Dict] = []
             self.metrics = ShardMetrics()
-            self.state_history: List[Dict] = []
-            self.last_state_update = datetime.now()
-            self._backup_state: Optional[Dict] = None
             self.processed_transactions: Set[str] = set()
-            self._initialize_default_balances()
-    
-        def _initialize_default_balances(self) -> None:
-            """Initialize default balances for testing."""
-            if not self.state["balances"]:
-                self.state["balances"] = {
-                    f"user{i}": 1000.0 for i in range(10)
-                }
+            self._backup_state: Optional[Dict] = None
     
         def update_state(self, block: Block) -> bool:
-            """Update state based on a new block."""
-            try:
-                # Create state backup
-                self._backup_state = deepcopy(self.state)
+            """
+            Update state based on a new block.
+            
+            Args:
+                block: Block containing transactions to process
                 
-                # Process each transaction
+            Returns:
+                bool: True if state update successful
+            """
+            try:
+                # Create backup
+                self._backup_state = deepcopy(self.state)
+    
+                # Process all transactions
                 for tx in block.transactions:
                     if not self._process_transaction(tx):
-                        logger.error(f"Failed to process transaction {tx.transaction_id}")
-                        self.rollback_state()
+                        self._rollback_state()
                         return False
     
                 # Update metadata
                 self.state["metadata"].update({
                     "last_updated": datetime.now().isoformat(),
-                    "last_block_index": block.index,
-                    "total_transactions": self.state["metadata"].get("total_transactions", 0) + len(block.transactions)
+                    "total_transactions": self.state["metadata"]["total_transactions"] + len(block.transactions),
+                    "last_block": block.index
                 })
     
-                # Save state snapshot if needed
-                if self._should_save_snapshot():
-                    self._save_state_snapshot()
+                # Update metrics
+                self.metrics.total_transactions += len(block.transactions)
+                
+                # Take snapshot if needed
+                if self._should_snapshot():
+                    self._take_snapshot()
     
                 return True
     
             except Exception as e:
                 logger.error(f"Failed to update state: {str(e)}")
-                self.rollback_state()
+                self._rollback_state()
                 return False
     
         def _process_transaction(self, transaction: Transaction) -> bool:
-            """Process a single transaction's state changes."""
-            try:
-                # Skip if already processed
-                if transaction.transaction_id in self.processed_transactions:
-                    return True
-    
-                # Get transaction amount
-                amount = float(transaction.data.get("amount", 0))
-                if amount <= 0:
-                    logger.error(f"Invalid amount in transaction {transaction.transaction_id}")
-                    return False
-    
-                # Update balances
-                balances = self.state["balances"]
+            """
+            Process a single transaction's state changes.
+            
+            Args:
+                transaction: Transaction to process
                 
-                # Ensure accounts exist
-                if transaction.sender not in balances:
-                    balances[transaction.sender] = 1000.0
-                if transaction.receiver not in balances:
-                    balances[transaction.receiver] = 1000.0
+            Returns:
+                bool: True if transaction processed successfully
+            """
+            try:
+                sender = transaction.sender
+                receiver = transaction.receiver
+                amount = float(transaction.data.get("amount", 0))
+                
+                # Initialize balances if needed
+                if sender not in self.state["balances"]:
+                    self.state["balances"][sender] = 1000.0  # Initial balance
+                if receiver not in self.state["balances"]:
+                    self.state["balances"][receiver] = 1000.0  # Initial balance
     
                 # Check balance
-                if balances[transaction.sender] < amount:
-                    logger.error(f"Insufficient balance for {transaction.sender}")
+                if self.state["balances"][sender] < amount:
+                    logger.error(f"Insufficient funds for transaction {transaction.transaction_id}")
                     return False
     
                 # Update balances
-                balances[transaction.sender] -= amount
-                balances[transaction.receiver] += amount
+                self.state["balances"][sender] -= amount
+                self.state["balances"][receiver] += amount
     
-                # Update metadata
-                self.state["metadata"]["total_volume"] = (
-                    self.state["metadata"].get("total_volume", 0.0) + amount
-                )
+                # Track total volume
+                self.state["metadata"]["total_volume"] += amount
     
                 # Mark as processed
                 self.processed_transactions.add(transaction.transaction_id)
-                
+    
                 return True
     
             except Exception as e:
-                logger.error(f"Error processing transaction: {str(e)}")
+                logger.error(f"Failed to process transaction {transaction.transaction_id}: {str(e)}")
                 return False
     
-        def _should_save_snapshot(self) -> bool:
-            """Determine if state snapshot should be saved."""
-            return len(self.state_history) == 0 or len(str(self.state)) > self.config.max_state_size * 0.9
+        def _should_snapshot(self) -> bool:
+            """Determine if state snapshot should be taken."""
+            state_size = len(str(self.state))
+            return (
+                len(self._state_snapshots) == 0 or 
+                state_size > self.config.max_state_size * 0.9
+            )
     
-        def _save_state_snapshot(self) -> None:
-            """Save a snapshot of current state."""
+        def _take_snapshot(self) -> None:
+            """Take a snapshot of current state."""
             try:
                 snapshot = {
                     'timestamp': datetime.now().isoformat(),
                     'state': deepcopy(self.state),
-                    'metrics': self.metrics.to_dict(),
+                    'metrics': self.metrics.to_dict()
                 }
-                self.state_history.append(snapshot)
+                self._state_snapshots.append(snapshot)
                 
                 # Keep only last 10 snapshots
-                if len(self.state_history) > 10:
-                    self.state_history = self.state_history[-10:]
+                if len(self._state_snapshots) > 10:
+                    self._state_snapshots = self._state_snapshots[-10:]
     
             except Exception as e:
-                logger.error(f"Failed to save state snapshot: {str(e)}")
+                logger.error(f"Failed to take state snapshot: {str(e)}")
     
-        def rollback_state(self) -> bool:
+        def _rollback_state(self) -> None:
             """Rollback to last backup state."""
             if self._backup_state is not None:
                 self.state = deepcopy(self._backup_state)
                 self._backup_state = None
-                return True
-            return False
     
-        def get_metrics(self) -> Dict:
-            """Get current metrics."""
+        def get_balance(self, address: str) -> float:
+            """
+            Get balance for an address.
+            
+            Args:
+                address: Address to get balance for
+                
+            Returns:
+                float: Current balance
+            """
+            return self.state["balances"].get(address, 0.0)
+    
+        def get_metrics(self) -> Dict[str, Any]:
+            """
+            Get state metrics.
+            
+            Returns:
+                Dict[str, Any]: Dictionary of metrics
+            """
             return {
-                "total_transactions": self.state["metadata"].get("total_transactions", 0),
-                "total_volume": self.state["metadata"].get("total_volume", 0.0),
+                "total_transactions": self.state["metadata"]["total_transactions"],
+                "total_volume": self.state["metadata"]["total_volume"],
                 "state_size": len(str(self.state)),
-                "processed_transactions": len(self.processed_transactions),
-                "pending_transactions": 0  # Added for compatibility with tests
+                "processed_transactions": len(self.processed_transactions)
             }
     
-        def to_dict(self) -> Dict:
-            """Convert manager state to dictionary."""
+        def to_dict(self) -> Dict[str, Any]:
+            """
+            Convert state manager to dictionary format.
+            
+            Returns:
+                Dict[str, Any]: Dictionary representation
+            """
             return {
-                'state': deepcopy(self.state),
-                'metrics': self.metrics.to_dict(),
-                'last_update': self.last_state_update.isoformat(),
-                'processed_transactions': list(self.processed_transactions)
+                "state": deepcopy(self.state),
+                "metrics": self.metrics.to_dict(),
+                "processed_transactions": list(self.processed_transactions),
+                "snapshots": self._state_snapshots.copy()
             }
     
         @classmethod
-        def from_dict(cls, data: Dict, shard_id: int, config: ShardConfig) -> 'StateManager':
-            """Create manager from dictionary data."""
+        def from_dict(cls, data: Dict[str, Any], shard_id: int, config: ShardConfig) -> 'StateManager':
+            """
+            Create state manager from dictionary data.
+            
+            Args:
+                data: Dictionary containing state data
+                shard_id: ID of the shard
+                config: Configuration parameters
+                
+            Returns:
+                StateManager: New state manager instance
+            """
             manager = cls(shard_id, config)
-            manager.state = deepcopy(data['state'])
-            manager.metrics = ShardMetrics.from_dict(data['metrics'])
-            manager.last_state_update = datetime.fromisoformat(data['last_update'])
-            manager.processed_transactions = set(data.get('processed_transactions', []))
+            manager.state = deepcopy(data.get("state", {}))
+            manager._state_snapshots = data.get("snapshots", []).copy()
+            manager.processed_transactions = set(data.get("processed_transactions", []))
+            manager.metrics = ShardMetrics.from_dict(data.get("metrics", {}))
             return manager
+    
+        def __str__(self) -> str:
+            """String representation."""
+            return f"StateManager(shard={self.shard_id}, tx_count={self.state['metadata']['total_transactions']})"
 ```
 
 
@@ -10311,15 +10376,15 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/core/shard/base.py
-# Size: 8891 bytes
-# Last Modified: Sat Oct 26 04:38:17 2024
+# Size: 12484 bytes
+# Last Modified: Sat Oct 26 14:05:45 2024
 # Language: py
 # ============================================================
 
 ```py
     # blockchain/core/shard/base.py
     
-    from typing import Dict, List, Optional, Set
+    from typing import Dict, List, Optional, Set, Any, Union
     import logging
     from datetime import datetime
     from copy import deepcopy
@@ -10341,23 +10406,43 @@ icn-prototype/
         delegating specific functionalities to specialized managers while
         maintaining backward compatibility with existing interfaces.
         """
-        
-        def __init__(self, shard_id: int, config: Optional[ShardConfig] = None):
+    
+        # Maintain class-level defaults for backward compatibility
+        DEFAULT_MAX_TRANSACTIONS = 100
+    
+        def __init__(self, shard_id: int, config: Optional[ShardConfig] = None, **kwargs):
             """
             Initialize a new shard.
             
             Args:
                 shard_id: Unique identifier for this shard
                 config: Optional configuration, uses defaults if not provided
+                **kwargs: Legacy support for direct parameter passing
+                         (e.g., max_transactions_per_block)
             """
+            if not isinstance(shard_id, int) or shard_id < 0:
+                raise ValueError("Invalid shard_id. Must be non-negative integer.")
+    
+            # Handle legacy initialization
+            if config is None:
+                config = ShardConfig()
+                if 'max_transactions_per_block' in kwargs:
+                    config.max_transactions_per_block = kwargs['max_transactions_per_block']
+                if 'max_pending_transactions' in kwargs:
+                    config.max_pending_transactions = kwargs['max_pending_transactions']
+    
             self.shard_id = shard_id
-            self.config = config or ShardConfig()
+            self.config = config
             
             # Initialize managers
-            self.transaction_manager = TransactionManager(shard_id, self.config)
-            self.state_manager = StateManager(shard_id, self.config)
-            self.validation_manager = ValidationManager(shard_id, self.config)
-            self.cross_shard_manager = CrossShardManager(shard_id, self.config)
+            try:
+                self.transaction_manager = TransactionManager(shard_id, self.config)
+                self.state_manager = StateManager(shard_id, self.config)
+                self.validation_manager = ValidationManager(shard_id, self.config)
+                self.cross_shard_manager = CrossShardManager(shard_id, self.config)
+            except Exception as e:
+                logger.error(f"Failed to initialize shard managers: {str(e)}")
+                raise
             
             # Core properties
             self.chain: List[Block] = []
@@ -10370,39 +10455,89 @@ icn-prototype/
     
         def _initialize_state(self) -> None:
             """Initialize the shard's state with required structure."""
-            self.state_manager.state.update({
-                "metadata": {
-                    "shard_id": self.shard_id,
-                    "created_at": datetime.now().isoformat(),
-                    "last_updated": datetime.now().isoformat(),
-                    "total_transactions": 0,
-                    "total_volume": 0.0
-                }
-            })
-            
-            # Ensure balances are initialized
-            if "balances" not in self.state_manager.state:
-                self.state_manager.state["balances"] = {
-                    f"user{i}": 1000.0 for i in range(10)
-                }
+            try:
+                self.state_manager.state.update({
+                    "metadata": {
+                        "shard_id": self.shard_id,
+                        "created_at": datetime.now().isoformat(),
+                        "last_updated": datetime.now().isoformat(),
+                        "total_transactions": 0,
+                        "total_volume": 0.0,
+                        "version": "1.0"
+                    }
+                })
+                
+                # Ensure balances are initialized
+                if "balances" not in self.state_manager.state:
+                    self.state_manager.state["balances"] = {
+                        f"user{i}": 1000.0 for i in range(10)
+                    }
+            except Exception as e:
+                logger.error(f"Failed to initialize state: {str(e)}")
+                raise
     
         def _create_genesis_block(self) -> None:
             """Create and add the genesis block."""
-            genesis_block = Block(
-                index=0,
-                previous_hash="0" * 64,
-                timestamp=datetime.now(),
-                transactions=[],
-                validator="genesis",
-                shard_id=self.shard_id
-            )
+            try:
+                genesis_block = Block(
+                    index=0,
+                    previous_hash="0" * 64,
+                    timestamp=datetime.now(),
+                    transactions=[],
+                    validator="genesis",
+                    shard_id=self.shard_id
+                )
+                
+                self.chain.append(genesis_block)
+                self.height = 1
+                self.known_validators.add("genesis")
+            except Exception as e:
+                logger.error(f"Failed to create genesis block: {str(e)}")
+                raise
+    
+        @property
+        def max_transactions_per_block(self) -> int:
+            """Property accessor for backward compatibility."""
+            return self.config.max_transactions_per_block
+    
+        @classmethod
+        def get_max_transactions_per_block(cls) -> int:
+            """Class method accessor for backward compatibility."""
+            return cls.DEFAULT_MAX_TRANSACTIONS
+    
+        @property
+        def cross_shard_references(self) -> Dict[int, List[str]]:
+            """Property accessor for cross shard references."""
+            return self.cross_shard_manager.cross_shard_refs
+    
+        @property
+        def average_block_time(self) -> float:
+            """Calculate average time between blocks."""
+            if len(self.chain) < 2:
+                return 0.0
             
-            self.chain.append(genesis_block)
-            self.height = 1
-            self.known_validators.add("genesis")
+            total_time = sum(
+                (self.chain[i].timestamp - self.chain[i-1].timestamp).total_seconds()
+                for i in range(1, len(self.chain))
+            )
+            return total_time / (len(self.chain) - 1)
+    
+        @property
+        def pending_transactions(self) -> List[Transaction]:
+            """Property accessor for backward compatibility."""
+            return self.transaction_manager.pending_transactions
+    
+        @property
+        def state(self) -> Dict:
+            """Property accessor for backward compatibility."""
+            return self.state_manager.state
     
         def add_transaction(self, transaction: Transaction) -> bool:
             """Add a new transaction to the shard."""
+            if not isinstance(transaction, Transaction):
+                logger.error("Invalid transaction type")
+                return False
+    
             try:
                 # Validate transaction
                 if not self.validation_manager.validate_transaction(transaction):
@@ -10425,6 +10560,10 @@ icn-prototype/
     
         def create_block(self, validator: str) -> Optional[Block]:
             """Create a new block from pending transactions."""
+            if not validator:
+                logger.error("Invalid validator ID")
+                return None
+    
             try:
                 transactions = self.transaction_manager.select_transactions_for_block()
                 if not transactions:
@@ -10442,8 +10581,7 @@ icn-prototype/
                 # Add cross-shard references
                 cross_shard_refs = self.cross_shard_manager.get_pending_validations()
                 if cross_shard_refs:
-                    for ref in cross_shard_refs:
-                        block.cross_shard_refs.append(ref.transaction_id)
+                    block.cross_shard_refs.extend(ref.transaction_id for ref in cross_shard_refs)
     
                 return block
     
@@ -10453,6 +10591,10 @@ icn-prototype/
     
         def add_block(self, block: Block) -> bool:
             """Add a validated block to the chain."""
+            if not isinstance(block, Block):
+                logger.error("Invalid block type")
+                return False
+    
             try:
                 # Validate block
                 if not self.validation_manager.validate_block(block, self.chain[-1] if self.chain else None):
@@ -10499,77 +10641,87 @@ icn-prototype/
                 logger.error(f"Chain validation failed: {str(e)}")
                 return False
     
-        def get_metrics(self) -> Dict:
+        def get_metrics(self) -> Dict[str, Any]:
             """Get comprehensive shard metrics."""
-            metrics = {
-                "shard_id": self.shard_id,
-                "height": self.height,
-                "chain_size": len(self.chain),
-                "known_validators": len(self.known_validators)
-            }
-            
-            # Add metrics from each manager
-            metrics.update(self.state_manager.get_metrics())
-            metrics.update(self.transaction_manager.get_metrics())
-            
-            # Add cross-shard metrics
-            cross_shard_metrics = self.cross_shard_manager.get_metrics()
-            metrics.update(cross_shard_metrics)
-            
-            return metrics
+            try:
+                # Core metrics
+                metrics = {
+                    "shard_id": self.shard_id,
+                    "height": self.height,
+                    "chain_size": len(self.chain),
+                    "known_validators": len(self.known_validators),
+                    "last_block_time": self.chain[-1].timestamp.isoformat() if self.chain else None,
+                    "average_block_time": self.average_block_time
+                }
+                
+                # Add metrics from each manager
+                metrics.update(self.state_manager.get_metrics())
+                metrics.update(self.transaction_manager.get_metrics())
+                metrics.update(self.cross_shard_manager.get_metrics())
+                
+                return metrics
     
-        @property
-        def pending_transactions(self) -> List[Transaction]:
-            """Property for backward compatibility."""
-            return self.transaction_manager.pending_transactions
+            except Exception as e:
+                logger.error(f"Failed to get metrics: {str(e)}")
+                return {"error": str(e)}
     
-        @property
-        def state(self) -> Dict:
-            """Property for backward compatibility."""
-            return self.state_manager.state
-    
-        def to_dict(self) -> Dict:
+        def to_dict(self) -> Dict[str, Any]:
             """Convert shard state to dictionary format."""
-            return {
-                "shard_id": self.shard_id,
-                "height": self.height,
-                "chain": [block.to_dict() for block in self.chain],
-                "config": self.config.to_dict(),
-                "known_validators": list(self.known_validators),
-                "transaction_manager": self.transaction_manager.to_dict(),
-                "state_manager": self.state_manager.to_dict(),
-                "cross_shard_manager": self.cross_shard_manager.to_dict()
-            }
+            try:
+                return {
+                    "shard_id": self.shard_id,
+                    "height": self.height,
+                    "chain": [block.to_dict() for block in self.chain],
+                    "config": self.config.to_dict(),
+                    "known_validators": list(self.known_validators),
+                    "transaction_manager": self.transaction_manager.to_dict(),
+                    "state_manager": self.state_manager.to_dict(),
+                    "cross_shard_manager": self.cross_shard_manager.to_dict(),
+                    "version": "1.0"
+                }
+            except Exception as e:
+                logger.error(f"Failed to convert shard to dictionary: {str(e)}")
+                raise
     
         @classmethod
-        def from_dict(cls, data: Dict) -> 'Shard':
+        def from_dict(cls, data: Dict[str, Any]) -> 'Shard':
             """Create shard from dictionary data."""
-            config = ShardConfig.from_dict(data["config"])
-            shard = cls(data["shard_id"], config)
-            
-            # Restore chain
-            shard.chain = [Block.from_dict(block) for block in data["chain"]]
-            shard.height = data["height"]
-            shard.known_validators = set(data["known_validators"])
-            
-            # Restore managers
-            shard.transaction_manager = TransactionManager.from_dict(
-                data["transaction_manager"],
-                shard.shard_id,
-                config
-            )
-            shard.state_manager = StateManager.from_dict(
-                data["state_manager"],
-                shard.shard_id,
-                config
-            )
-            shard.cross_shard_manager = CrossShardManager.from_dict(
-                data["cross_shard_manager"],
-                shard.shard_id,
-                config
-            )
-            
-            return shard
+            try:
+                # Create instance with config
+                config = ShardConfig.from_dict(data["config"])
+                shard = cls(data["shard_id"], config)
+                
+                # Restore chain
+                shard.chain = [Block.from_dict(block) for block in data["chain"]]
+                shard.height = data["height"]
+                shard.known_validators = set(data["known_validators"])
+                
+                # Restore managers
+                shard.transaction_manager = TransactionManager.from_dict(
+                    data["transaction_manager"],
+                    shard.shard_id,
+                    config
+                )
+                shard.state_manager = StateManager.from_dict(
+                    data["state_manager"],
+                    shard.shard_id,
+                    config
+                )
+                shard.cross_shard_manager = CrossShardManager.from_dict(
+                    data["cross_shard_manager"],
+                    shard.shard_id,
+                    config
+                )
+                
+                return shard
+                
+            except Exception as e:
+                logger.error(f"Failed to create shard from dictionary: {str(e)}")
+                raise
+    
+        def __str__(self) -> str:
+            """String representation."""
+            return f"Shard(id={self.shard_id}, height={self.height}, validators={len(self.known_validators)})"
 ```
 
 
@@ -12331,7 +12483,7 @@ icn-prototype/
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/__init__.py
 # Size: 159 bytes
-# Last Modified: Thu Oct 24 00:41:50 2024
+# Last Modified: Sat Oct 26 14:10:55 2024
 # Language: py
 # ============================================================
 
@@ -12341,4 +12493,967 @@ icn-prototype/
     from .proof_of_cooperation import ProofOfCooperation
     
     __all__ = ["ProofOfCooperation"]
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py
+# Size: 9628 bytes
+# Last Modified: Sat Oct 26 14:13:32 2024
+# Language: py
+# ============================================================
+
+```py
+    # blockchain/consensus/proof_of_cooperation/metrics_manager.py
+    
+    import logging
+    from typing import Dict, Optional, Any
+    from datetime import datetime, timedelta
+    from .types import ConsensusMetrics, ValidationResult, ValidatorHistory
+    
+    logger = logging.getLogger(__name__)
+    
+    class MetricsManager:
+        """
+        Manages performance metrics and statistics for the consensus mechanism.
+        Tracks validation success rates, block times, and other performance indicators.
+        """
+    
+        def __init__(self):
+            """Initialize the metrics manager."""
+            self.metrics = ConsensusMetrics()
+            self.last_metrics_reset = datetime.now()
+            self.reset_interval = timedelta(hours=24)
+    
+        def record_validation(self, result: ValidationResult, validator_id: str, shard_id: Optional[int] = None) -> None:
+            """
+            Record the result of a validation attempt.
+    
+            Args:
+                result: The validation result
+                validator_id: ID of the validator
+                shard_id: Optional shard ID where validation occurred
+            """
+            try:
+                self.metrics.total_validations += 1
+                
+                if result.success:
+                    self.metrics.successful_validations += 1
+                else:
+                    self.metrics.failed_validations += 1
+    
+                # Track per-validator metrics
+                if validator_id not in self.metrics.validator_counts:
+                    self.metrics.validator_counts[validator_id] = 0
+                self.metrics.validator_counts[validator_id] += 1
+    
+                # Track shard-specific metrics if applicable
+                if shard_id is not None:
+                    if shard_id not in self.metrics.shard_metrics:
+                        self.metrics.shard_metrics[shard_id] = {
+                            "validations": 0,
+                            "successful": 0,
+                            "failed": 0,
+                            "unique_validators": set()
+                        }
+                    
+                    shard_metrics = self.metrics.shard_metrics[shard_id]
+                    shard_metrics["validations"] += 1
+                    if result.success:
+                        shard_metrics["successful"] += 1
+                    else:
+                        shard_metrics["failed"] += 1
+                    shard_metrics["unique_validators"].add(validator_id)
+    
+                # Add any custom metrics from the validation result
+                self._update_custom_metrics(result.metrics)
+    
+            except Exception as e:
+                logger.error(f"Failed to record validation metrics: {str(e)}")
+    
+        def record_block_time(self, block_time: float) -> None:
+            """
+            Record the time taken to create a block.
+    
+            Args:
+                block_time: Time in seconds to create the block
+            """
+            try:
+                current_avg = self.metrics.average_block_time
+                total_blocks = self.metrics.total_blocks_validated
+                
+                # Update running average
+                self.metrics.average_block_time = (
+                    (current_avg * total_blocks + block_time) / (total_blocks + 1)
+                )
+                self.metrics.total_blocks_validated += 1
+    
+            except Exception as e:
+                logger.error(f"Failed to record block time: {str(e)}")
+    
+        def record_collusion_detection(self) -> None:
+            """Record a collusion detection event."""
+            self.metrics.collusion_detections += 1
+    
+        def record_new_node_participation(self) -> None:
+            """Record participation by a new node."""
+            self.metrics.new_node_participations += 1
+    
+        def get_validator_performance(self, validator_id: str) -> Dict[str, Any]:
+            """
+            Get performance metrics for a specific validator.
+    
+            Args:
+                validator_id: ID of the validator
+    
+            Returns:
+                Dict containing validator's performance metrics
+            """
+            try:
+                total_validations = self.metrics.validator_counts.get(validator_id, 0)
+                if total_validations == 0:
+                    return {
+                        "total_validations": 0,
+                        "success_rate": 0.0,
+                        "shard_participation": {}
+                    }
+    
+                # Calculate success rate for this validator
+                validator_successes = sum(
+                    1 for s in self.metrics.shard_metrics.values()
+                    if validator_id in s["unique_validators"] and s["successful"] > 0
+                )
+                success_rate = validator_successes / total_validations
+    
+                # Calculate shard participation
+                shard_participation = {
+                    shard_id: {
+                        "validations": metrics["validations"],
+                        "success_rate": metrics["successful"] / metrics["validations"]
+                        if metrics["validations"] > 0 else 0.0
+                    }
+                    for shard_id, metrics in self.metrics.shard_metrics.items()
+                    if validator_id in metrics["unique_validators"]
+                }
+    
+                return {
+                    "total_validations": total_validations,
+                    "success_rate": success_rate,
+                    "shard_participation": shard_participation
+                }
+    
+            except Exception as e:
+                logger.error(f"Failed to get validator performance: {str(e)}")
+                return {"error": str(e)}
+    
+        def get_shard_metrics(self, shard_id: int) -> Dict[str, Any]:
+            """
+            Get metrics for a specific shard.
+    
+            Args:
+                shard_id: ID of the shard
+    
+            Returns:
+                Dict containing shard metrics
+            """
+            try:
+                if shard_id not in self.metrics.shard_metrics:
+                    return {
+                        "validations": 0,
+                        "successful": 0,
+                        "failed": 0,
+                        "validator_count": 0,
+                        "success_rate": 0.0
+                    }
+    
+                metrics = self.metrics.shard_metrics[shard_id]
+                total = metrics["validations"]
+                
+                return {
+                    "validations": total,
+                    "successful": metrics["successful"],
+                    "failed": metrics["failed"],
+                    "validator_count": len(metrics["unique_validators"]),
+                    "success_rate": metrics["successful"] / total if total > 0 else 0.0
+                }
+    
+            except Exception as e:
+                logger.error(f"Failed to get shard metrics: {str(e)}")
+                return {"error": str(e)}
+    
+        def get_all_metrics(self) -> Dict[str, Any]:
+            """
+            Get all consensus metrics.
+    
+            Returns:
+                Dict containing all metrics
+            """
+            try:
+                total_validations = self.metrics.total_validations
+                return {
+                    "total_validations": total_validations,
+                    "successful_validations": self.metrics.successful_validations,
+                    "failed_validations": self.metrics.failed_validations,
+                    "success_rate": (
+                        self.metrics.successful_validations / total_validations 
+                        if total_validations > 0 else 0.0
+                    ),
+                    "average_block_time": self.metrics.average_block_time,
+                    "collusion_detections": self.metrics.collusion_detections,
+                    "new_node_participations": self.metrics.new_node_participations,
+                    "total_blocks_validated": self.metrics.total_blocks_validated,
+                    "active_validators": len(self.metrics.validator_counts),
+                    "shard_metrics": {
+                        shard_id: self.get_shard_metrics(shard_id)
+                        for shard_id in self.metrics.shard_metrics
+                    }
+                }
+    
+            except Exception as e:
+                logger.error(f"Failed to get all metrics: {str(e)}")
+                return {"error": str(e)}
+    
+        def _update_custom_metrics(self, custom_metrics: Dict[str, Any]) -> None:
+            """
+            Update metrics with custom values from validation results.
+    
+            Args:
+                custom_metrics: Dictionary of custom metrics to update
+            """
+            try:
+                for key, value in custom_metrics.items():
+                    if not hasattr(self.metrics, key):
+                        setattr(self.metrics, key, value)
+                    else:
+                        current_value = getattr(self.metrics, key)
+                        if isinstance(current_value, (int, float)):
+                            setattr(self.metrics, key, current_value + value)
+                        elif isinstance(current_value, dict):
+                            current_value.update(value)
+    
+            except Exception as e:
+                logger.error(f"Failed to update custom metrics: {str(e)}")
+    
+        def check_metrics_reset(self) -> None:
+            """Check if metrics should be reset based on reset interval."""
+            if datetime.now() - self.last_metrics_reset > self.reset_interval:
+                self.metrics = ConsensusMetrics()
+                self.last_metrics_reset = datetime.now()
+    
+        def to_dict(self) -> Dict[str, Any]:
+            """Convert metrics manager state to dictionary."""
+            return {
+                "metrics": self.metrics.to_dict(),
+                "last_reset": self.last_metrics_reset.isoformat(),
+                "reset_interval_seconds": self.reset_interval.total_seconds()
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict[str, Any]) -> 'MetricsManager':
+            """Create metrics manager from dictionary data."""
+            manager = cls()
+            manager.metrics = ConsensusMetrics.from_dict(data["metrics"])
+            manager.last_metrics_reset = datetime.fromisoformat(data["last_reset"])
+            manager.reset_interval = timedelta(seconds=data["reset_interval_seconds"])
+            return manager
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py
+# Size: 14712 bytes
+# Last Modified: Sat Oct 26 14:14:19 2024
+# Language: py
+# ============================================================
+
+```py
+    # blockchain/consensus/proof_of_cooperation/reputation_manager.py
+    
+    from typing import Dict, List, Optional, Set, Any
+    from datetime import datetime, timedelta
+    import logging
+    import math
+    from .types import ConsensusConfig, ValidationResult, ValidationStats
+    from ..core.node import Node
+    
+    logger = logging.getLogger(__name__)
+    
+    class ReputationManager:
+        """
+        Manages reputation scoring and calculations for the consensus mechanism.
+        Handles all aspects of node reputation including score calculation,
+        decay, and validation eligibility.
+        """
+    
+        def __init__(self, config: ConsensusConfig):
+            """
+            Initialize the reputation manager.
+    
+            Args:
+                config: The consensus configuration parameters
+            """
+            self.config = config
+            self.node_stats: Dict[str, ValidationStats] = {}
+            self.last_score_update: Dict[str, datetime] = {}
+            self.score_cache: Dict[str, float] = {}
+            self.cache_duration = timedelta(minutes=5)
+    
+        def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
+            """
+            Calculate a node's cooperation score with all factors.
+    
+            Args:
+                node: The node to calculate score for
+                shard_id: Optional shard ID for shard-specific scoring
+    
+            Returns:
+                float: The calculated cooperation score
+            """
+            try:
+                # Check cache first
+                cache_key = f"{node.node_id}:{shard_id or 'all'}"
+                if cache_key in self.score_cache:
+                    cache_time = self.last_score_update.get(cache_key)
+                    if cache_time and datetime.now() - cache_time < self.cache_duration:
+                        return self.score_cache[cache_key]
+    
+                # Calculate base reputation score
+                base_score = sum(
+                    score * self.config.reputation_weights.get(category, 1.0)
+                    for category, score in node.reputation_scores.items()
+                )
+    
+                # Calculate modifying factors
+                factors = [
+                    self._calculate_diversity_factor(node),
+                    self._calculate_consistency_factor(node),
+                    self._calculate_performance_factor(node)
+                ]
+    
+                # Add shard-specific factor if applicable
+                if shard_id is not None:
+                    factors.append(self._calculate_shard_factor(node, shard_id))
+    
+                # Apply all factors
+                final_score = base_score
+                for factor in factors:
+                    final_score *= factor
+    
+                # Apply time decay
+                time_factor = self._calculate_time_decay(node)
+                final_score *= time_factor
+    
+                # Cache result
+                self.score_cache[cache_key] = final_score
+                self.last_score_update[cache_key] = datetime.now()
+    
+                return max(0.0, final_score)
+    
+            except Exception as e:
+                logger.error(f"Error calculating cooperation score: {str(e)}")
+                return 0.0
+    
+        def _calculate_diversity_factor(self, node: Node) -> float:
+            """
+            Calculate diversity factor based on cooperative interactions.
+    
+            Args:
+                node: The node to calculate factor for
+    
+            Returns:
+                float: The calculated diversity factor
+            """
+            try:
+                recent_interactions = node.cooperative_interactions[-100:]
+                if not recent_interactions:
+                    return 1.0
+    
+                # Calculate unique interaction ratio
+                unique_coops = len(set(recent_interactions))
+                total_interactions = len(recent_interactions)
+                diversity_score = unique_coops / total_interactions
+    
+                # Progressive scaling based on experience
+                if total_interactions >= 20:
+                    if unique_coops >= 5:
+                        return 1.0 + math.log(1 + diversity_score) * 1.5
+                    return 1.0 + math.log(1 + diversity_score)
+    
+                return max(0.7, diversity_score)  # Minimum baseline for new nodes
+    
+            except Exception as e:
+                logger.error(f"Error calculating diversity factor: {str(e)}")
+                return 0.7
+    
+        def _calculate_consistency_factor(self, node: Node) -> float:
+            """
+            Calculate consistency factor based on validation history.
+    
+            Args:
+                node: The node to calculate factor for
+    
+            Returns:
+                float: The calculated consistency factor
+            """
+            try:
+                if not node.validation_history:
+                    return 1.0
+    
+                recent_validations = node.validation_history[-50:]
+                successful = sum(
+                    1 for v in recent_validations 
+                    if v.get("evidence", {}).get("success", False)
+                )
+                success_rate = successful / len(recent_validations)
+    
+                # Progressive scaling based on experience
+                if node.total_validations < 10:
+                    min_rate = self.config.validation_thresholds["min_success_rate"] * 0.8
+                else:
+                    min_rate = self.config.validation_thresholds["min_success_rate"]
+    
+                if success_rate > 0.95:  # Exceptional performance
+                    return 1.8
+                elif success_rate > 0.8:  # Strong performance
+                    return 1.5
+                elif success_rate > min_rate:
+                    return 1.0 + ((success_rate - min_rate) / (1 - min_rate))
+    
+                return max(0.5, success_rate / min_rate)
+    
+            except Exception as e:
+                logger.error(f"Error calculating consistency factor: {str(e)}")
+                return 0.5
+    
+        def _calculate_performance_factor(self, node: Node) -> float:
+            """
+            Calculate performance factor based on node metrics.
+    
+            Args:
+                node: The node to calculate factor for
+    
+            Returns:
+                float: The calculated performance factor
+            """
+            try:
+                metrics = node.performance_metrics
+                if not metrics:
+                    return 1.0
+    
+                # Weighted performance metrics
+                weights = {
+                    "availability": 0.35,
+                    "validation_success_rate": 0.35,
+                    "network_reliability": 0.3
+                }
+    
+                weighted_sum = sum(
+                    (metrics.get(metric, 0) / 100) * weight
+                    for metric, weight in weights.items()
+                )
+    
+                # Apply bonuses for exceptional performance
+                if weighted_sum > 0.95:
+                    return weighted_sum * 1.2
+                elif weighted_sum > 0.9:
+                    return weighted_sum * 1.1
+    
+                return max(
+                    self.config.validation_thresholds["min_availability"],
+                    weighted_sum
+                )
+    
+            except Exception as e:
+                logger.error(f"Error calculating performance factor: {str(e)}")
+                return self.config.validation_thresholds["min_availability"]
+    
+        def _calculate_shard_factor(self, node: Node, shard_id: int) -> float:
+            """
+            Calculate shard-specific factor.
+    
+            Args:
+                node: The node to calculate factor for
+                shard_id: The shard ID to calculate factor for
+    
+            Returns:
+                float: The calculated shard factor
+            """
+            try:
+                if shard_id not in node.active_shards:
+                    return 0.0
+    
+                # Calculate time-based experience
+                time_in_shard = (
+                    datetime.now() - node.active_shards[shard_id]
+                ).total_seconds()
+                experience = min(1.0, time_in_shard / (24 * 3600))
+    
+                # Get shard-specific success rate
+                stats = self.node_stats.get(node.node_id, ValidationStats())
+                shard_stats = stats.shard_validations.get(shard_id, {})
+                
+                if shard_stats:
+                    success_rate = (
+                        shard_stats.get("successful", 0) /
+                        max(1, shard_stats.get("selections", 1))
+                    )
+                else:
+                    success_rate = 1.0  # New to shard
+    
+                # Progressive weighting
+                if experience < 0.2:  # New to shard
+                    return 0.7 + (0.3 * success_rate)
+                else:
+                    return 0.4 + (0.3 * experience) + (0.3 * success_rate)
+    
+            except Exception as e:
+                logger.error(f"Error calculating shard factor: {str(e)}")
+                return 0.5
+    
+        def _calculate_time_decay(self, node: Node) -> float:
+            """
+            Calculate time-based decay factor.
+    
+            Args:
+                node: The node to calculate decay for
+    
+            Returns:
+                float: The calculated decay factor
+            """
+            try:
+                stats = self.node_stats.get(node.node_id)
+                if not stats or not stats.last_validation:
+                    return 1.0
+    
+                hours_inactive = (
+                    datetime.now() - stats.last_validation
+                ).total_seconds() / 3600
+    
+                if hours_inactive > 24:
+                    return math.exp(-hours_inactive / 24)
+                return 1.0
+    
+            except Exception as e:
+                logger.error(f"Error calculating time decay: {str(e)}")
+                return 1.0
+    
+        def can_validate(self, node: Node, shard_id: Optional[int] = None) -> bool:
+            """
+            Check if a node can participate in validation.
+    
+            Args:
+                node: The node to check
+                shard_id: Optional shard ID for shard-specific validation
+    
+            Returns:
+                bool: True if node can validate
+            """
+            try:
+                # Handle new nodes
+                if node.total_validations < 5:
+                    return (
+                        node.can_validate(shard_id) and
+                        node.get_total_reputation() >= 
+                        self.config.min_reputation * 
+                        self.config.validation_thresholds["new_node_reputation_factor"]
+                    )
+    
+                # Standard checks
+                if not node.can_validate(shard_id):
+                    return False
+    
+                # Check reputation requirement
+                total_reputation = node.get_total_reputation()
+                reputation_requirement = self.config.min_reputation
+    
+                # Scale requirements with experience
+                if node.total_validations > 20:
+                    reputation_requirement *= 1.2
+                elif node.total_validations > 10:
+                    reputation_requirement *= 1.0
+                else:
+                    reputation_requirement *= 0.7
+    
+                if total_reputation < reputation_requirement:
+                    return False
+    
+                # Check recent performance
+                stats = self.node_stats.get(node.node_id, ValidationStats())
+                if stats.selections > 0:
+                    recent_success = (
+                        stats.successful_validations / stats.selections
+                    )
+                    if (recent_success < 
+                        self.config.validation_thresholds["min_success_rate"] and
+                        node.total_validations > 10):
+                        return False
+    
+                return True
+    
+            except Exception as e:
+                logger.error(f"Error checking validation eligibility: {str(e)}")
+                return False
+    
+        def update_stats(self, node_id: str, result: ValidationResult, shard_id: Optional[int] = None) -> None:
+            """
+            Update validation statistics for a node.
+    
+            Args:
+                node_id: ID of the node
+                result: The validation result
+                shard_id: Optional shard ID where validation occurred
+            """
+            try:
+                if node_id not in self.node_stats:
+                    self.node_stats[node_id] = ValidationStats()
+    
+                stats = self.node_stats[node_id]
+                stats.selections += 1
+                stats.last_validation = datetime.now()
+    
+                if result.success:
+                    stats.successful_validations += 1
+                    stats.consecutive_failures = 0
+                else:
+                    stats.consecutive_failures += 1
+    
+                if shard_id is not None:
+                    if shard_id not in stats.shard_validations:
+                        stats.shard_validations[shard_id] = {
+                            "selections": 0,
+                            "successful": 0
+                        }
+                    
+                    shard_stats = stats.shard_validations[shard_id]
+                    shard_stats["selections"] += 1
+                    if result.success:
+                        shard_stats["successful"] += 1
+    
+            except Exception as e:
+                logger.error(f"Error updating validation stats: {str(e)}")
+    
+        def get_node_stats(self, node_id: str) -> Optional[ValidationStats]:
+            """
+            Get validation statistics for a node.
+    
+            Args:
+                node_id: ID of the node
+    
+            Returns:
+                Optional[ValidationStats]: The node's validation stats if found
+            """
+            return self.node_stats.get(node_id)
+    
+        def to_dict(self) -> Dict[str, Any]:
+            """Convert reputation manager state to dictionary."""
+            return {
+                "node_stats": {
+                    node_id: {
+                        "selections": stats.selections,
+                        "successful_validations": stats.successful_validations,
+                        "consecutive_failures": stats.consecutive_failures,
+                        "last_validation": stats.last_validation.isoformat() if stats.last_validation else None,
+                        "shard_validations": stats.shard_validations
+                    }
+                    for node_id, stats in self.node_stats.items()
+                },
+                "score_cache": self.score_cache,
+                "last_score_update": {
+                    k: v.isoformat() 
+                    for k, v in self.last_score_update.items()
+                }
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig) -> 'ReputationManager':
+            """Create reputation manager from dictionary data."""
+            manager = cls(config)
+    
+            # Restore node stats
+            for node_id, stats_data in data["node_stats"].items():
+                stats = ValidationStats()
+                stats.selections = stats_data["selections"]
+                stats.successful_validations = stats_data["successful_validations"]
+                stats.consecutive_failures = stats_data["consecutive_failures"]
+                if stats_data["last_validation"]:
+                    stats.last_validation = datetime.fromisoformat(
+                        stats_data["last_validation"]
+                    )
+                stats.shard_validations = stats_data["shard_validations"]
+                manager.node_stats[node_id] = stats
+    
+            # Restore cache
+            manager.score_cache = data["score_cache"]
+            manager.last_score_update = {
+                k: datetime.fromisoformat(v)
+                for k, v in data["last_score_update"].items()
+            }
+    
+            return manager
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py
+# Size: 0 bytes
+# Last Modified: Sat Oct 26 14:10:55 2024
+# Language: py
+# ============================================================
+
+```py
+
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/types.py
+# Size: 7904 bytes
+# Last Modified: Sat Oct 26 14:11:33 2024
+# Language: py
+# ============================================================
+
+```py
+    # blockchain/consensus/proof_of_cooperation/types.py
+    
+    from dataclasses import dataclass, field
+    from typing import Dict, List, Optional, Set, Any
+    from datetime import datetime
+    
+    @dataclass
+    class ConsensusConfig:
+        """Configuration parameters for the consensus mechanism."""
+        min_reputation: float = 10.0
+        cooldown_blocks: int = 3
+        reputation_decay_factor: float = 0.95
+        collusion_threshold: float = 0.75
+        
+        reputation_weights: Dict[str, float] = field(default_factory=lambda: {
+            "cooperative_growth": 1.5,
+            "proposal_participation": 1.2,
+            "transaction_validation": 1.3,
+            "resource_sharing": 1.3,
+            "conflict_resolution": 1.1,
+            "community_building": 1.2,
+            "sustainability": 1.2,
+            "innovation": 1.3,
+            "network_stability": 1.4,
+            "data_availability": 1.2,
+        })
+        
+        validation_thresholds: Dict[str, float] = field(default_factory=lambda: {
+            "min_participation": 0.05,
+            "min_success_rate": 0.4,
+            "min_availability": 0.6,
+            "max_consecutive_validations": 3,
+            "new_node_reputation_factor": 0.3,
+            "min_interactions": 3,
+        })
+    
+    @dataclass
+    class ValidationResult:
+        """Result of a validation operation."""
+        success: bool
+        reason: Optional[str] = None
+        metrics: Dict[str, Any] = field(default_factory=dict)
+    
+    @dataclass
+    class ValidatorHistory:
+        """Record of validator activity."""
+        node_id: str
+        timestamp: datetime
+        shard_id: Optional[int]
+        success: bool = True
+        metrics: Dict[str, Any] = field(default_factory=dict)
+    
+    @dataclass
+    class ValidationStats:
+        """Statistics for validation performance."""
+        selections: int = 0
+        successful_validations: int = 0
+        consecutive_failures: int = 0
+        last_validation: Optional[datetime] = None
+        shard_validations: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    
+    @dataclass
+    class ConsensusMetrics:
+        """Metrics tracking for consensus operations."""
+        total_validations: int = 0
+        successful_validations: int = 0
+        failed_validations: int = 0
+        collusion_detections: int = 0
+        total_blocks_validated: int = 0
+        new_node_participations: int = 0
+        average_block_time: float = 0.0
+        validator_counts: Dict[str, int] = field(default_factory=dict)
+        shard_metrics: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    
+        def to_dict(self) -> Dict[str, Any]:
+            """Convert metrics to dictionary format."""
+            return {
+                "total_validations": self.total_validations,
+                "successful_validations": self.successful_validations,
+                "failed_validations": self.failed_validations,
+                "collusion_detections": self.collusion_detections,
+                "total_blocks_validated": self.total_blocks_validated,
+                "new_node_participations": self.new_node_participations,
+                "average_block_time": self.average_block_time,
+                "validator_counts": self.validator_counts.copy(),
+                "shard_metrics": {
+                    shard_id: metrics.copy() 
+                    for shard_id, metrics in self.shard_metrics.items()
+                }
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict[str, Any]) -> 'ConsensusMetrics':
+            """Create metrics from dictionary data."""
+            metrics = cls()
+            metrics.total_validations = data.get("total_validations", 0)
+            metrics.successful_validations = data.get("successful_validations", 0)
+            metrics.failed_validations = data.get("failed_validations", 0)
+            metrics.collusion_detections = data.get("collusion_detections", 0)
+            metrics.total_blocks_validated = data.get("total_blocks_validated", 0)
+            metrics.new_node_participations = data.get("new_node_participations", 0)
+            metrics.average_block_time = data.get("average_block_time", 0.0)
+            metrics.validator_counts = data.get("validator_counts", {}).copy()
+            metrics.shard_metrics = data.get("shard_metrics", {}).copy()
+            return metrics
+    
+    @dataclass
+    class ConsensusState:
+        """Current state of the consensus mechanism."""
+        config: ConsensusConfig
+        metrics: ConsensusMetrics = field(default_factory=ConsensusMetrics)
+        validator_history: List[ValidatorHistory] = field(default_factory=list)
+        validation_stats: Dict[str, ValidationStats] = field(default_factory=dict)
+        active_validators: Set[str] = field(default_factory=set)
+        
+        def to_dict(self) -> Dict[str, Any]:
+            """Convert state to dictionary format."""
+            return {
+                "config": {
+                    "min_reputation": self.config.min_reputation,
+                    "cooldown_blocks": self.config.cooldown_blocks,
+                    "reputation_decay_factor": self.config.reputation_decay_factor,
+                    "collusion_threshold": self.config.collusion_threshold,
+                    "reputation_weights": self.config.reputation_weights.copy(),
+                    "validation_thresholds": self.config.validation_thresholds.copy()
+                },
+                "metrics": self.metrics.to_dict(),
+                "validator_history": [
+                    {
+                        "node_id": h.node_id,
+                        "timestamp": h.timestamp.isoformat(),
+                        "shard_id": h.shard_id,
+                        "success": h.success,
+                        "metrics": h.metrics.copy()
+                    }
+                    for h in self.validator_history
+                ],
+                "validation_stats": {
+                    node_id: {
+                        "selections": stats.selections,
+                        "successful_validations": stats.successful_validations,
+                        "consecutive_failures": stats.consecutive_failures,
+                        "last_validation": stats.last_validation.isoformat() if stats.last_validation else None,
+                        "shard_validations": stats.shard_validations.copy()
+                    }
+                    for node_id, stats in self.validation_stats.items()
+                },
+                "active_validators": list(self.active_validators)
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict[str, Any]) -> 'ConsensusState':
+            """Create state from dictionary data."""
+            config = ConsensusConfig(
+                min_reputation=data["config"]["min_reputation"],
+                cooldown_blocks=data["config"]["cooldown_blocks"],
+                reputation_decay_factor=data["config"]["reputation_decay_factor"],
+                collusion_threshold=data["config"]["collusion_threshold"]
+            )
+            config.reputation_weights = data["config"]["reputation_weights"].copy()
+            config.validation_thresholds = data["config"]["validation_thresholds"].copy()
+            
+            metrics = ConsensusMetrics.from_dict(data["metrics"])
+            
+            validator_history = [
+                ValidatorHistory(
+                    node_id=h["node_id"],
+                    timestamp=datetime.fromisoformat(h["timestamp"]),
+                    shard_id=h["shard_id"],
+                    success=h["success"],
+                    metrics=h["metrics"].copy()
+                )
+                for h in data["validator_history"]
+            ]
+            
+            validation_stats = {
+                node_id: ValidationStats(
+                    selections=stats["selections"],
+                    successful_validations=stats["successful_validations"],
+                    consecutive_failures=stats["consecutive_failures"],
+                    last_validation=datetime.fromisoformat(stats["last_validation"]) if stats["last_validation"] else None,
+                    shard_validations=stats["shard_validations"].copy()
+                )
+                for node_id, stats in data["validation_stats"].items()
+            }
+            
+            active_validators = set(data["active_validators"])
+            
+            return cls(
+                config=config,
+                metrics=metrics,
+                validator_history=validator_history,
+                validation_stats=validation_stats,
+                active_validators=active_validators
+            )
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py
+# Size: 0 bytes
+# Last Modified: Sat Oct 26 14:10:55 2024
+# Language: py
+# ============================================================
+
+```py
+
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py
+# Size: 0 bytes
+# Last Modified: Sat Oct 26 14:10:55 2024
+# Language: py
+# ============================================================
+
+```py
+
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py
+# Size: 0 bytes
+# Last Modified: Sat Oct 26 14:10:55 2024
+# Language: py
+# ============================================================
+
+```py
+
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/__init__.py
+# Size: 0 bytes
+# Last Modified: Sat Oct 26 14:10:55 2024
+# Language: py
+# ============================================================
+
+```py
+
 ```

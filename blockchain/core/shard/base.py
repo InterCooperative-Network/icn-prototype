@@ -13,12 +13,14 @@ from ..transaction import Transaction
 
 logger = logging.getLogger(__name__)
 
+
 class Shard:
     """
     Main shard class that coordinates all shard components.
     
     This class serves as the primary interface for shard operations,
-    delegating specific functionalities to specialized managers.
+    delegating specific functionalities to specialized managers while
+    maintaining backward compatibility with existing interfaces.
     """
     
     def __init__(self, shard_id: int, config: Optional[ShardConfig] = None):
@@ -43,6 +45,14 @@ class Shard:
         self.height = 0
         self.known_validators: Set[str] = set()
         
+        # Backward compatibility properties
+        self._pending_transactions = property(
+            lambda self: self.transaction_manager.pending_transactions
+        )
+        self._state = property(
+            lambda self: self.state_manager.state
+        )
+        
         self._create_genesis_block()
 
     def _create_genesis_block(self) -> None:
@@ -61,6 +71,17 @@ class Shard:
         self.known_validators.add("genesis")
         self.state_manager.update_state(genesis_block)
 
+    # Property accessors for backward compatibility
+    @property
+    def pending_transactions(self) -> List[Transaction]:
+        """Backward compatible access to pending transactions."""
+        return self.transaction_manager.pending_transactions
+
+    @property
+    def state(self) -> Dict:
+        """Backward compatible access to state."""
+        return self.state_manager.state
+
     def add_transaction(self, transaction: Transaction) -> bool:
         """
         Add a new transaction to the shard.
@@ -71,6 +92,8 @@ class Shard:
         Returns:
             bool: True if transaction was added successfully
         """
+        if not self.validation_manager.validate_transaction(transaction):
+            return False
         return self.transaction_manager.add_transaction(transaction)
 
     def create_block(self, validator: str) -> Optional[Block]:
@@ -96,6 +119,7 @@ class Shard:
             shard_id=self.shard_id
         )
 
+        # Update cross-shard references
         self.cross_shard_manager.update_references(block)
         return block
 
@@ -150,10 +174,12 @@ class Shard:
             "shard_id": self.shard_id,
             "height": self.height,
             "chain_size": len(self.chain),
-            "known_validators": len(self.known_validators)
+            "known_validators": len(self.known_validators),
+            "pending_transactions": len(self.pending_transactions),
+            "state_size": len(str(self.state))
         }
 
-        # Get metrics from each manager
+        # Add metrics from each manager
         metrics.update(self.state_manager.get_metrics())
         metrics.update(self.transaction_manager.get_metrics())
         
@@ -161,9 +187,8 @@ class Shard:
         cross_shard_metrics = self.cross_shard_manager.get_metrics()
         metrics.update({
             "pending_validations": cross_shard_metrics["pending_validations"],
-            "validated_refs": len(cross_shard_metrics.get("validated_refs", set())),
-            "cross_shard_operations": cross_shard_metrics.get("cross_shard_operations", 0),
-            "refs_by_shard": cross_shard_metrics.get("refs_by_shard", {})
+            "validated_refs": cross_shard_metrics.get("validated_refs", 0),
+            "cross_shard_operations": cross_shard_metrics.get("cross_shard_operations", 0)
         })
 
         return metrics

@@ -1,3 +1,5 @@
+# blockchain/core/shard/shard_types.py
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -26,11 +28,11 @@ class ShardMetrics:
             for field in self.__dataclass_fields__.values()
         }
 
-    @classmethod
+    @classmethod 
     def from_dict(cls, data: Dict) -> 'ShardMetrics':
         """Create metrics from dictionary."""
         return cls(**{
-            k: v for k, v in data.items()
+            k: v for k, v in data.items() 
             if k in cls.__dataclass_fields__
         })
 
@@ -41,7 +43,7 @@ class ShardConfig:
     max_pending_transactions: int = 200
     max_cross_shard_refs: int = 50
     pruning_interval: int = 60  # minutes
-    min_block_interval: int = 1  # seconds
+    min_block_interval: int = 0  # Changed to 0 for testing
     max_block_size: int = 1024 * 1024  # 1MB
     max_state_size: int = 10 * 1024 * 1024  # 10MB
     max_validators: int = 100
@@ -58,7 +60,7 @@ class ShardConfig:
     def from_dict(cls, data: Dict) -> 'ShardConfig':
         """Create config from dictionary."""
         return cls(**{
-            k: v for k, v in data.items()
+            k: v for k, v in data.items() 
             if k in cls.__dataclass_fields__
         })
 

@@ -1,7 +1,10 @@
 
 # File Summary:
+# /home/matt/icn-prototype/code_manager.py - 7912 bytes - Included
+# /home/matt/icn-prototype/update_validation.py - 1085 bytes - Included
 # /home/matt/icn-prototype/concatenate_code_files.py - 4625 bytes - Included
 # /home/matt/icn-prototype/setup.py - 513 bytes - Included
+# /home/matt/icn-prototype/update_imports.py - 1584 bytes - Included
 # /home/matt/icn-prototype/did/did.py - 6778 bytes - Included
 # /home/matt/icn-prototype/did/__init__.py - 0 bytes - Included
 # /home/matt/icn-prototype/api/server.py - 5851 bytes - Included
@@ -13,14 +16,14 @@
 # /home/matt/icn-prototype/tests/integration/test_transaction_processing.py - 11207 bytes - Included
 # /home/matt/icn-prototype/tests/integration/test_smart_contract_execution.py - 13339 bytes - Included
 # /home/matt/icn-prototype/tests/integration/__init__.py - 0 bytes - Included
-# /home/matt/icn-prototype/tests/performance/test_scalability.py - 0 bytes - Included
-# /home/matt/icn-prototype/tests/performance/test_stress_resilience.py - 0 bytes - Included
+# /home/matt/icn-prototype/tests/performance/test_scalability.py - 10845 bytes - Included
+# /home/matt/icn-prototype/tests/performance/test_stress_resilience.py - 12792 bytes - Included
 # /home/matt/icn-prototype/tests/performance/test_load_handling.py - 0 bytes - Included
 # /home/matt/icn-prototype/tests/performance/__init__.py - 0 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_proof_of_cooperation.py - 10692 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_contract_executor.py - 9655 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_block.py - 10172 bytes - Included
-# /home/matt/icn-prototype/tests/unit/test_shard.py - 10373 bytes - Included
+# /home/matt/icn-prototype/tests/unit/test_shard.py - 12841 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_node.py - 7500 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_transaction.py - 7391 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_blockchain.py - 5893 bytes - Included
@@ -42,13 +45,13 @@
 # /home/matt/icn-prototype/blockchain/core/transaction.py - 11471 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/blockchain.py - 8966 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/__init__.py - 299 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/transaction_manager.py - 7403 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/cross_shard.py - 7970 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/types.py - 3112 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/state_manager.py - 6410 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/validation.py - 6890 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/base.py - 6556 bytes - Included
-# /home/matt/icn-prototype/blockchain/core/shard/__init__.py - 480 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/validation_manager.py - 6705 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/transaction_manager.py - 5115 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/state_manager.py - 10402 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/shard_types.py - 3173 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/base.py - 7883 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/cross_shard_manager.py - 7344 bytes - Included
+# /home/matt/icn-prototype/blockchain/core/shard/__init__.py - 503 bytes - Included
 # /home/matt/icn-prototype/blockchain/contracts/contract_executor.py - 11587 bytes - Included
 # /home/matt/icn-prototype/blockchain/contracts/smart_contract.py - 14617 bytes - Included
 # /home/matt/icn-prototype/blockchain/contracts/__init__.py - 207 bytes - Included
@@ -60,9 +63,12 @@
 icn-prototype/
     requirements.txt
     pytest.ini
+    code_manager.py
+    update_validation.py
     concatenate_code_files.py
     setup.py
     .coverage
+    update_imports.py
     did/
         did.py
         __init__.py
@@ -75,6 +81,9 @@ icn-prototype/
                 nodeids
                 lastfailed
                 stepwise
+    .code_backups/
+        validation_manager.py.20241025_183911.bak
+        validation_manager.py.20241025_183906.bak
     api/
         server.py
         __init__.py
@@ -125,12 +134,12 @@ icn-prototype/
             blockchain.py
             __init__.py
             shard/
+                validation_manager.py
                 transaction_manager.py
-                cross_shard.py
-                types.py
                 state_manager.py
-                validation.py
+                shard_types.py
                 base.py
+                cross_shard_manager.py
                 __init__.py
         contracts/
             contract_executor.py
@@ -143,6 +152,287 @@ icn-prototype/
 
 # Code Files Concatenation:
 
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/code_manager.py
+# Size: 7912 bytes
+# Last Modified: Fri Oct 25 18:36:38 2024
+# Language: py
+# ============================================================
+
+```py
+    import os
+    import re
+    from typing import Dict, List, Optional, Tuple
+    import difflib
+    
+    class CodeManager:
+        """
+        Manages code updates based on specially formatted input files.
+        Input files should have a header in this format:
+        
+        ```
+        # TARGET: path/to/file.py
+        # MODE: [replace|update|append]
+        # SECTION: [optional] function or class name
+        # DESCRIPTION: What this change does
+        ```
+        """
+        
+        def __init__(self, project_root: str):
+            self.project_root = project_root
+            self.backup_dir = os.path.join(project_root, '.code_backups')
+            os.makedirs(self.backup_dir, exist_ok=True)
+    
+        def process_file(self, input_file: str, dry_run: bool = True) -> bool:
+            """Process a code update file."""
+            try:
+                # Read and parse the input file
+                with open(input_file, 'r') as f:
+                    content = f.read()
+    
+                # Parse header
+                header = self._parse_header(content)
+                if not header:
+                    print(f"Invalid header in {input_file}")
+                    return False
+    
+                # Get the code content
+                code = self._extract_code(content)
+                if not code:
+                    print(f"No code found in {input_file}")
+                    return False
+    
+                # Get target file path
+                target_file = os.path.join(self.project_root, header['target'])
+                if not os.path.exists(target_file):
+                    print(f"Target file not found: {target_file}")
+                    return False
+    
+                # Create backup
+                if not dry_run:
+                    self._backup_file(target_file)
+    
+                # Process based on mode
+                if header['mode'] == 'replace':
+                    success = self._replace_code(target_file, code, dry_run)
+                elif header['mode'] == 'update':
+                    success = self._update_code(target_file, code, header.get('section'), dry_run)
+                elif header['mode'] == 'append':
+                    success = self._append_code(target_file, code, dry_run)
+                else:
+                    print(f"Unknown mode: {header['mode']}")
+                    return False
+    
+                if success and not dry_run:
+                    print(f"Successfully updated {target_file}")
+                elif success:
+                    print(f"Dry run successful for {target_file}")
+                return success
+    
+            except Exception as e:
+                print(f"Error processing {input_file}: {str(e)}")
+                return False
+    
+        def _parse_header(self, content: str) -> Optional[Dict[str, str]]:
+            """Parse the header section of the input file."""
+            header_pattern = r"#\s*TARGET:\s*(.+)\n#\s*MODE:\s*(.+)\n(?:#\s*SECTION:\s*(.+)\n)?#\s*DESCRIPTION:\s*(.+)"
+            match = re.match(header_pattern, content)
+            if not match:
+                return None
+    
+            return {
+                'target': match.group(1).strip(),
+                'mode': match.group(2).strip().lower(),
+                'section': match.group(3).strip() if match.group(3) else None,
+                'description': match.group(4).strip()
+            }
+    
+        def _extract_code(self, content: str) -> Optional[str]:
+            """Extract the code section after the header."""
+            lines = content.split('\n')
+            start_idx = 0
+            for i, line in enumerate(lines):
+                if not line.strip().startswith('#'):
+                    start_idx = i
+                    break
+            return '\n'.join(lines[start_idx:]).strip()
+    
+        def _backup_file(self, filepath: str) -> None:
+            """Create a backup of the target file."""
+            import time
+            import shutil
+            
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            backup_name = f"{os.path.basename(filepath)}.{timestamp}.bak"
+            backup_path = os.path.join(self.backup_dir, backup_name)
+            
+            shutil.copy2(filepath, backup_path)
+    
+        def _replace_code(self, target_file: str, new_code: str, dry_run: bool) -> bool:
+            """Replace entire file content."""
+            if dry_run:
+                with open(target_file, 'r') as f:
+                    old_code = f.read()
+                self._show_diff(old_code, new_code)
+                return True
+    
+            try:
+                with open(target_file, 'w') as f:
+                    f.write(new_code)
+                return True
+            except Exception as e:
+                print(f"Error replacing code: {str(e)}")
+                return False
+    
+        def _update_code(self, target_file: str, new_code: str, section: Optional[str], dry_run: bool) -> bool:
+            """Update specific section of code."""
+            try:
+                with open(target_file, 'r') as f:
+                    content = f.read()
+    
+                if section:
+                    # Find the section (class or function)
+                    section_pattern = rf"(class|def)\s+{section}\b[^\n]*:"
+                    match = re.search(section_pattern, content)
+                    if not match:
+                        print(f"Section '{section}' not found")
+                        return False
+    
+                    # Find section bounds
+                    start = match.start()
+                    end = self._find_section_end(content, start)
+                    
+                    updated_content = content[:start] + new_code + content[end:]
+                else:
+                    updated_content = new_code
+    
+                if dry_run:
+                    self._show_diff(content, updated_content)
+                    return True
+    
+                with open(target_file, 'w') as f:
+                    f.write(updated_content)
+                return True
+    
+            except Exception as e:
+                print(f"Error updating code: {str(e)}")
+                return False
+    
+        def _append_code(self, target_file: str, new_code: str, dry_run: bool) -> bool:
+            """Append code to end of file."""
+            try:
+                with open(target_file, 'r') as f:
+                    content = f.read()
+    
+                updated_content = content.rstrip() + '\n\n' + new_code + '\n'
+    
+                if dry_run:
+                    self._show_diff(content, updated_content)
+                    return True
+    
+                with open(target_file, 'w') as f:
+                    f.write(updated_content)
+                return True
+    
+            except Exception as e:
+                print(f"Error appending code: {str(e)}")
+                return False
+    
+        def _find_section_end(self, content: str, start: int) -> int:
+            """Find the end of a code section based on indentation."""
+            lines = content[start:].split('\n')
+            if not lines:
+                return start
+    
+            # Get section indentation level
+            first_line = lines[0]
+            section_indent = len(first_line) - len(first_line.lstrip())
+            
+            # Find where indentation returns to original level
+            current_pos = start + len(first_line) + 1
+            for line in lines[1:]:
+                if line.strip() and len(line) - len(line.lstrip()) <= section_indent:
+                    return current_pos
+                current_pos += len(line) + 1
+    
+            return len(content)
+    
+        def _show_diff(self, old_code: str, new_code: str) -> None:
+            """Show a diff of the changes."""
+            diff = difflib.unified_diff(
+                old_code.splitlines(keepends=True),
+                new_code.splitlines(keepends=True),
+                fromfile='old',
+                tofile='new'
+            )
+            print(''.join(diff))
+    
+    def main():
+        """Command line interface for the code manager."""
+        import argparse
+        
+        parser = argparse.ArgumentParser(description="Manage code updates in the project")
+        parser.add_argument('input_file', help="File containing the code update")
+        parser.add_argument('--project-root', default='.', help="Root directory of the project")
+        parser.add_argument('--dry-run', action='store_true', help="Show changes without applying them")
+        
+        args = parser.parse_args()
+        
+        manager = CodeManager(args.project_root)
+        success = manager.process_file(args.input_file, args.dry_run)
+        
+        return 0 if success else 1
+    
+    if __name__ == "__main__":
+        exit(main())
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/update_validation.py
+# Size: 1085 bytes
+# Last Modified: Fri Oct 25 18:39:35 2024
+# Language: py
+# ============================================================
+
+```py
+    # TARGET: blockchain/core/shard/validation_manager.py
+    # MODE: update
+    # SECTION: validate_transaction
+    # DESCRIPTION: Add new validation checks for transaction amounts
+    
+    def validate_transaction(self, transaction: Transaction) -> bool:
+        """
+        Validate a transaction before adding to pool.
+        
+        Args:
+            transaction: Transaction to validate
+            
+        Returns:
+            bool: True if transaction is valid
+        """
+        try:
+            # Check cache first
+            tx_id = transaction.transaction_id
+            if tx_id in self.validation_cache:
+                return self.validation_cache[tx_id]
+    
+            # Basic validation
+            if not transaction.validate():
+                logger.error(f"Transaction {tx_id} failed basic validation")
+                self.validation_cache[tx_id] = False
+                return False
+    
+            # NEW: Check transaction amount
+            if transaction.data.get('amount', 0) <= 0:
+                logger.error(f"Transaction {tx_id} has invalid amount")
+                self.validation_cache[tx_id] = False
+                return False
+    
+            # Rest of the validation logic...
+```
 
 
 # ============================================================
@@ -304,6 +594,56 @@ icn-prototype/
         ],
         python_requires='>=3.8',
     )
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/update_imports.py
+# Size: 1584 bytes
+# Last Modified: Fri Oct 25 18:30:46 2024
+# Language: py
+# ============================================================
+
+```py
+    import os
+    
+    def update_imports(directory):
+        """Update all imports of types to shard_types in Python files."""
+        replacements = [
+            ('from .shard_types import', 'from .shard_types import'),
+            ('from blockchain.core.shard.shard_types import', 'from blockchain.core.shard.shard_types import'),
+            ('from ..core.shard.shard_types import', 'from ..core.shard.shard_types import')
+        ]
+        
+        # Walk through all Python files
+        for root, _, files in os.walk(directory):
+            for file in files:
+                if file.endswith('.py'):
+                    filepath = os.path.join(root, file)
+                    try:
+                        # Read file content
+                        with open(filepath, 'r') as f:
+                            content = f.read()
+                        
+                        # Check if any replacements are needed
+                        original_content = content
+                        for old, new in replacements:
+                            if old in content:
+                                content = content.replace(old, new)
+                        
+                        # Only write if changes were made
+                        if content != original_content:
+                            print(f"Updating imports in {filepath}")
+                            with open(filepath, 'w') as f:
+                                f.write(content)
+                    
+                    except Exception as e:
+                        print(f"Error processing {filepath}: {e}")
+    
+    if __name__ == "__main__":
+        # Run from project root directory
+        update_imports(".")
+        print("Import updates completed!")
 ```
 
 
@@ -2402,25 +2742,576 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/tests/performance/test_scalability.py
-# Size: 0 bytes
-# Last Modified: Wed Oct 23 19:40:09 2024
+# Size: 10845 bytes
+# Last Modified: Sat Oct 26 00:27:39 2024
 # Language: py
 # ============================================================
 
 ```py
-
+    import unittest
+    import sys
+    import os
+    import random
+    from typing import List
+    import time
+    import tqdm
+    from contextlib import contextmanager
+    import psutil
+    import gc
+    import logging
+    
+    # Add project root to Python path
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, project_root)
+    
+    from blockchain.core.shard import Shard, ShardConfig
+    from blockchain.core.transaction import Transaction
+    from blockchain.core.node import Node
+    from blockchain.consensus.proof_of_cooperation import ProofOfCooperation
+    
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    class TestScalability(unittest.TestCase):
+        """Test scalability characteristics of the ICN blockchain."""
+    
+        TIMEOUT_TRANSACTION_TEST = 30
+        TIMEOUT_SHARD_TEST = 30
+        TIMEOUT_CROSS_SHARD_TEST = 30
+        MAX_MEMORY_PERCENT = 80  # Max memory usage threshold
+        MAX_RETRIES = 1000  # Max retry limit for block creation
+    
+        def setUp(self):
+            """Set up test environment."""
+            logger.info("Setting up scalability test environment...")
+            self.config = ShardConfig(
+                max_transactions_per_block=100,
+                max_pending_transactions=500,
+                max_cross_shard_refs=10
+            )
+            self.shards = [Shard(shard_id=i, config=self.config) for i in range(3)]
+            self.nodes = self._create_test_nodes(6)
+            self.consensus = ProofOfCooperation()
+            logger.info("Setup complete.")
+    
+        def tearDown(self):
+            """Clean up after each test."""
+            self.shards = None
+            self.nodes = None
+            self.consensus = None
+            gc.collect()
+    
+        def _create_test_nodes(self, num_nodes: int) -> List[Node]:
+            """Create test nodes with varied capabilities."""
+            nodes = []
+            for i in range(num_nodes):
+                node = Node(
+                    node_id=f"node_{i}",
+                    cooperative_id=f"coop_{i % 2}",
+                    initial_stake=100.0
+                )
+                node.reputation_scores = {
+                    "validation": 20.0 + i,
+                    "resource_sharing": 20.0 + i * 0.5,
+                    "cooperative_growth": 20.0 + i * 0.3,
+                    "innovation": 20.0 + i * 0.2
+                }
+                shard_id = i % len(self.shards)
+                node.assign_to_shard(shard_id)
+                nodes.append(node)
+            return nodes
+    
+        def _check_memory_usage(self):
+            """Check current memory usage and raise exception if too high."""
+            process = psutil.Process(os.getpid())
+            memory_percent = process.memory_percent()
+            if memory_percent > self.MAX_MEMORY_PERCENT:
+                raise MemoryError(f"Memory usage too high: {memory_percent:.1f}%")
+            return memory_percent
+    
+        @contextmanager
+        def timeout(self, seconds, test_name):
+            """Context manager for test timeouts."""
+            start_time = time.time()
+            try:
+                yield
+            finally:
+                elapsed_time = time.time() - start_time
+                if elapsed_time > seconds:
+                    logger.warning(f"{test_name} timed out after {seconds} seconds")
+                else:
+                    logger.info(f"{test_name} completed in {elapsed_time:.2f} seconds")
+    
+        def _process_transactions(self, transactions: List[Transaction], batch_size: int):
+            """Process transactions in batches with memory checks."""
+            with tqdm.tqdm(total=len(transactions), desc="Processing Transactions", leave=True, dynamic_ncols=True) as progress_bar:
+                for i in range(0, len(transactions), batch_size):
+                    batch = transactions[i:i + batch_size]
+                    for tx in batch:
+                        shard_id = tx.shard_id
+                        self.shards[shard_id].add_transaction(tx)
+                    self._check_memory_usage()
+                    progress_bar.update(len(batch))
+                    gc.collect()
+    
+        def _create_and_add_blocks(self, shard, validators):
+            """Create and add blocks until no pending transactions remain."""
+            retry_count = 0
+            while shard.pending_transactions and retry_count < self.MAX_RETRIES:
+                validator = self.consensus.select_validator(validators)
+                if validator:
+                    block = shard.create_block(validator.node_id)
+                    if block:
+                        shard.add_block(block)
+                retry_count += 1
+                gc.collect()
+            if retry_count == self.MAX_RETRIES:
+                logger.warning(f"Max retries reached for shard {shard.shard_id}, some transactions may remain unprocessed.")
+    
+        def test_transaction_throughput_scaling(self):
+            """Test how transaction throughput scales with increasing load."""
+            logger.info("\nTesting transaction throughput scaling...")
+            transaction_counts = [50, 100, 200]
+            results = {}
+    
+            for count in transaction_counts:
+                logger.info(f"\nProcessing {count} transactions...")
+                transactions = self._generate_test_transactions(count)
+    
+                with self.timeout(self.TIMEOUT_TRANSACTION_TEST, f"Transaction test (count: {count})"):
+                    start_time = time.time()
+                    self._process_transactions(transactions, batch_size=10)
+    
+                    for shard in self.shards:
+                        validators = [n for n in self.nodes if shard.shard_id in n.shard_assignments]
+                        self._create_and_add_blocks(shard, validators)
+    
+                    elapsed_time = time.time() - start_time
+                    transactions_per_second = count / elapsed_time
+                    results[count] = {
+                        "elapsed_time": elapsed_time,
+                        "tps": transactions_per_second
+                    }
+                    logger.info(f"Completed {count} transactions at {transactions_per_second:.2f} TPS")
+    
+            for i in range(len(transaction_counts) - 1):
+                count_ratio = transaction_counts[i + 1] / transaction_counts[i]
+                time_ratio = results[transaction_counts[i + 1]]["elapsed_time"] / results[transaction_counts[i]]["elapsed_time"]
+                self.assertLess(time_ratio, count_ratio * 1.5)
+    
+        def test_shard_scaling(self):
+            """Test how system performance scales with number of shards."""
+            logger.info("\nTesting shard scaling...")
+            transaction_count = 100
+            shard_counts = [1, 2, 4]
+            results = {}
+    
+            base_transactions = self._generate_test_transactions(transaction_count)
+    
+            for shard_count in shard_counts:
+                logger.info(f"\nTesting with {shard_count} shards...")
+                test_shards = [Shard(shard_id=i, config=self.config) for i in range(shard_count)]
+                test_nodes = self._create_test_nodes(shard_count * 2)
+    
+                with self.timeout(self.TIMEOUT_SHARD_TEST, f"Shard test (count: {shard_count})"):
+                    start_time = time.time()
+    
+                    self._process_transactions(base_transactions, batch_size=10)
+    
+                    for shard in test_shards:
+                        validators = [n for n in test_nodes if shard.shard_id in n.shard_assignments]
+                        self._create_and_add_blocks(shard, validators)
+    
+                    elapsed_time = time.time() - start_time
+                    results[shard_count] = {
+                        "elapsed_time": elapsed_time,
+                        "tps": transaction_count / elapsed_time
+                    }
+                    logger.info(f"Completed test with {shard_count} shards at {transaction_count / elapsed_time:.2f} TPS")
+    
+            for i in range(len(shard_counts) - 1):
+                shard_ratio = shard_counts[i + 1] / shard_counts[i]
+                speedup = results[shard_counts[i]]["elapsed_time"] / results[shard_counts[i + 1]]["elapsed_time"]
+                expected_speedup = shard_ratio * 0.4
+                if speedup < expected_speedup:
+                    logger.warning(f"Speedup of {speedup:.2f} is less than expected ({expected_speedup:.2f})")
+                self.assertGreater(speedup, expected_speedup)
+    
+        def test_cross_shard_scalability(self):
+            """Test scalability of cross-shard transactions."""
+            logger.info("\nTesting cross-shard scalability...")
+            transaction_count = 100
+            cross_shard_percentages = [0, 20, 40]
+            results = {}
+    
+            for percentage in cross_shard_percentages:
+                logger.info(f"\nTesting with {percentage}% cross-shard transactions...")
+                transactions = self._generate_test_transactions(transaction_count, cross_shard_percentage=percentage)
+    
+                with self.timeout(self.TIMEOUT_CROSS_SHARD_TEST, f"Cross-shard test (percentage: {percentage}%)"):
+                    start_time = time.time()
+                    self._process_transactions(transactions, batch_size=10)
+    
+                    for shard in self.shards:
+                        validators = [n for n in self.nodes if shard.shard_id in n.shard_assignments]
+                        self._create_and_add_blocks(shard, validators)
+    
+                    elapsed_time = time.time() - start_time
+                    transactions_per_second = transaction_count / elapsed_time
+                    results[percentage] = {
+                        "elapsed_time": elapsed_time,
+                        "tps": transactions_per_second
+                    }
+                    logger.info(f"Completed {percentage}% cross-shard test at {transactions_per_second:.2f} TPS")
+    
+            base_time = results[0]["elapsed_time"]
+            for percentage in cross_shard_percentages[1:]:
+                self.assertLess(results[percentage]["elapsed_time"] / base_time, 3.0)
+    
+        def _generate_test_transactions(self, count: int, cross_shard_percentage: int = 0) -> List[Transaction]:
+            """Generate test transactions with specified cross-shard percentage."""
+            transactions = []
+            for i in range(count):
+                is_cross_shard = random.randint(1, 100) <= cross_shard_percentage
+    
+                shard_id = random.randint(0, len(self.shards) - 1)
+                target_shard = None
+                cross_shard_refs = []
+    
+                if is_cross_shard:
+                    target_shard = random.randint(0, len(self.shards) - 1)
+                    while target_shard == shard_id:
+                        target_shard = random.randint(0, len(self.shards) - 1)
+                    cross_shard_refs = [f"ref_{i}"]
+    
+                tx = Transaction(
+                    sender=f"sender_{i}",
+                    receiver=f"receiver_{i}",
+                    action="transfer",
+                    data={
+                        "amount": random.uniform(1, 100),
+                        "target_shard": target_shard
+                    } if is_cross_shard else {
+                        "amount": random.uniform(1, 100)
+                    },
+                    shard_id=shard_id,
+                    priority=random.randint(1, 5),
+                    cross_shard_refs=cross_shard_refs
+                )
+                transactions.append(tx)
+    
+            return transactions
+    
+    if __name__ == '__main__':
+        unittest.main(verbosity=2)
 ```
 
 
 # ============================================================
 # File: /home/matt/icn-prototype/tests/performance/test_stress_resilience.py
-# Size: 0 bytes
-# Last Modified: Wed Oct 23 19:40:09 2024
+# Size: 12792 bytes
+# Last Modified: Fri Oct 25 23:28:34 2024
 # Language: py
 # ============================================================
 
 ```py
-
+    # tests/performance/test_scalability.py
+    
+    import unittest
+    from datetime import datetime, timedelta
+    import sys
+    import os
+    import random
+    from typing import List, Dict
+    import time
+    import tqdm
+    from contextlib import contextmanager
+    
+    # Add project root to Python path
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, project_root)
+    
+    from blockchain.core.shard import Shard, ShardConfig
+    from blockchain.core.transaction import Transaction
+    from blockchain.core.block import Block
+    from blockchain.core.node import Node
+    from blockchain.consensus.proof_of_cooperation import ProofOfCooperation
+    
+    class TestScalability(unittest.TestCase):
+        """Test scalability characteristics of the ICN blockchain."""
+        
+        # Maximum time for each test in seconds
+        TIMEOUT_TRANSACTION_TEST = 60
+        TIMEOUT_SHARD_TEST = 60
+        TIMEOUT_CROSS_SHARD_TEST = 60
+    
+        def setUp(self):
+            """Set up test environment."""
+            print("\nSetting up scalability test environment...")
+            self.config = ShardConfig(
+                max_transactions_per_block=1000,
+                max_pending_transactions=5000,
+                max_cross_shard_refs=100
+            )
+            self.shards = [Shard(shard_id=i, config=self.config) for i in range(5)]
+            self.nodes = self._create_test_nodes(20)  # 20 nodes across shards
+            self.consensus = ProofOfCooperation()
+            print("Setup complete.")
+    
+        def _create_test_nodes(self, num_nodes: int) -> List[Node]:
+            """Create test nodes with varied capabilities."""
+            nodes = []
+            for i in range(num_nodes):
+                node = Node(
+                    node_id=f"node_{i}",
+                    cooperative_id=f"coop_{i % 3}",  # Distribute across 3 cooperatives
+                    initial_stake=100.0
+                )
+                # Vary node capabilities
+                node.reputation_scores = {
+                    "validation": 20.0 + i,
+                    "resource_sharing": 20.0 + i * 0.5,
+                    "cooperative_growth": 20.0 + i * 0.3,
+                    "innovation": 20.0 + i * 0.2
+                }
+                # Assign to random shard
+                shard_id = random.randint(0, len(self.shards) - 1)
+                node.assign_to_shard(shard_id)
+                nodes.append(node)
+            return nodes
+    
+        @contextmanager
+        def timeout(self, seconds, test_name):
+            """Context manager for test timeouts with progress bar."""
+            start_time = time.time()
+            progress_bar = tqdm.tqdm(total=seconds, desc=f"Running {test_name}", 
+                                    unit="s", leave=True)
+    
+            def update_progress():
+                elapsed = int(time.time() - start_time)
+                if elapsed <= seconds:
+                    progress_bar.n = elapsed
+                    progress_bar.refresh()
+    
+            try:
+                while True:
+                    if time.time() - start_time > seconds:
+                        raise TimeoutError(f"Test {test_name} timed out after {seconds} seconds")
+                    update_progress()
+                    yield
+                    break
+            finally:
+                progress_bar.close()
+    
+        def test_transaction_throughput_scaling(self):
+            """Test how transaction throughput scales with increasing load."""
+            print("\nTesting transaction throughput scaling...")
+            transaction_counts = [100, 500, 1000]  # Reduced counts for faster testing
+            results = {}
+    
+            for count in transaction_counts:
+                print(f"\nProcessing {count} transactions...")
+                with self.timeout(self.TIMEOUT_TRANSACTION_TEST, f"Transaction test (count: {count})"):
+                    # Generate test transactions
+                    transactions = self._generate_test_transactions(count)
+                    
+                    # Measure processing time
+                    start_time = time.time()
+                    
+                    # Process transactions with progress bar
+                    for tx in tqdm.tqdm(transactions, desc="Adding transactions", leave=False):
+                        shard_id = tx.shard_id
+                        self.shards[shard_id].add_transaction(tx)
+    
+                    # Process blocks with progress bar
+                    pending_blocks = True
+                    while pending_blocks:
+                        pending_blocks = False
+                        for shard in self.shards:
+                            if len(shard.pending_transactions) > 0:
+                                pending_blocks = True
+                                validator = self.consensus.select_validator(
+                                    [n for n in self.nodes if shard.shard_id in n.shard_assignments]
+                                )
+                                if validator:
+                                    block = shard.create_block(validator.node_id)
+                                    if block:
+                                        shard.add_block(block)
+    
+                    elapsed_time = time.time() - start_time
+                    transactions_per_second = count / elapsed_time
+                    
+                    results[count] = {
+                        "elapsed_time": elapsed_time,
+                        "tps": transactions_per_second
+                    }
+                    print(f"Completed {count} transactions at {transactions_per_second:.2f} TPS")
+    
+            # Verify scaling characteristics
+            for i in range(len(transaction_counts) - 1):
+                count_ratio = transaction_counts[i + 1] / transaction_counts[i]
+                time_ratio = results[transaction_counts[i + 1]]["elapsed_time"] / \
+                            results[transaction_counts[i]]["elapsed_time"]
+                
+                # Time increase should be less than proportional to transaction increase
+                self.assertLess(time_ratio, count_ratio * 1.5)
+    
+        def test_shard_scaling(self):
+            """Test how system performance scales with number of shards."""
+            print("\nTesting shard scaling...")
+            transaction_count = 500  # Reduced for faster testing
+            shard_counts = [1, 2, 4]  # Reduced counts for faster testing
+            results = {}
+    
+            base_transactions = self._generate_test_transactions(transaction_count)
+    
+            for shard_count in shard_counts:
+                print(f"\nTesting with {shard_count} shards...")
+                with self.timeout(self.TIMEOUT_SHARD_TEST, f"Shard test (count: {shard_count})"):
+                    test_shards = [Shard(shard_id=i, config=self.config) 
+                                  for i in range(shard_count)]
+                    test_nodes = self._create_test_nodes(shard_count * 4)
+                    
+                    start_time = time.time()
+                    
+                    # Process transactions with progress bar
+                    for tx in tqdm.tqdm(base_transactions, desc="Processing transactions", leave=False):
+                        tx.shard_id = random.randint(0, shard_count - 1)
+                        test_shards[tx.shard_id].add_transaction(tx)
+    
+                    # Process blocks
+                    pending_blocks = True
+                    with tqdm.tqdm(desc="Processing blocks", leave=False) as pbar:
+                        while pending_blocks:
+                            pending_blocks = False
+                            for shard in test_shards:
+                                if len(shard.pending_transactions) > 0:
+                                    pending_blocks = True
+                                    validator = self.consensus.select_validator(
+                                        [n for n in test_nodes if shard.shard_id in n.shard_assignments]
+                                    )
+                                    if validator:
+                                        block = shard.create_block(validator.node_id)
+                                        if block:
+                                            shard.add_block(block)
+                            pbar.update(1)
+    
+                    elapsed_time = time.time() - start_time
+                    results[shard_count] = {
+                        "elapsed_time": elapsed_time,
+                        "tps": transaction_count / elapsed_time
+                    }
+                    print(f"Completed test with {shard_count} shards at {transaction_count / elapsed_time:.2f} TPS")
+    
+            # Verify scaling efficiency
+            for i in range(len(shard_counts) - 1):
+                shard_ratio = shard_counts[i + 1] / shard_counts[i]
+                speedup = results[shard_counts[i]]["elapsed_time"] / \
+                         results[shard_counts[i + 1]]["elapsed_time"]
+                
+                # Should achieve at least 50% of perfect linear speedup
+                self.assertGreater(speedup, shard_ratio * 0.5)
+    
+        def test_cross_shard_scalability(self):
+            """Test scalability of cross-shard transactions."""
+            print("\nTesting cross-shard scalability...")
+            transaction_count = 500  # Reduced for faster testing
+            cross_shard_percentages = [0, 20, 50]  # Reduced for faster testing
+            results = {}
+    
+            for percentage in cross_shard_percentages:
+                print(f"\nTesting with {percentage}% cross-shard transactions...")
+                with self.timeout(self.TIMEOUT_CROSS_SHARD_TEST, 
+                                f"Cross-shard test (percentage: {percentage}%)"):
+                    transactions = self._generate_test_transactions(
+                        transaction_count, 
+                        cross_shard_percentage=percentage
+                    )
+                    
+                    start_time = time.time()
+                    
+                    # Process transactions with progress bar
+                    for tx in tqdm.tqdm(transactions, desc="Processing transactions", leave=False):
+                        shard_id = tx.shard_id
+                        self.shards[shard_id].add_transaction(tx)
+    
+                    # Process blocks
+                    pending_shards = set(range(len(self.shards)))
+                    with tqdm.tqdm(desc="Processing blocks", leave=False) as pbar:
+                        while pending_shards:
+                            for shard_id in list(pending_shards):
+                                shard = self.shards[shard_id]
+                                if not shard.pending_transactions:
+                                    pending_shards.remove(shard_id)
+                                    continue
+                                    
+                                validator = self.consensus.select_validator(
+                                    [n for n in self.nodes if shard_id in n.shard_assignments]
+                                )
+                                if validator:
+                                    block = shard.create_block(validator.node_id)
+                                    if block:
+                                        shard.add_block(block)
+                            pbar.update(1)
+    
+                    elapsed_time = time.time() - start_time
+                    results[percentage] = {
+                        "elapsed_time": elapsed_time,
+                        "tps": transaction_count / elapsed_time
+                    }
+                    print(f"Completed {percentage}% cross-shard test at {transaction_count / elapsed_time:.2f} TPS")
+    
+            # Verify cross-shard scaling characteristics
+            base_time = results[0]["elapsed_time"]
+            for percentage in cross_shard_percentages[1:]:
+                # Even at 50% cross-shard, shouldn't be more than 3x slower
+                self.assertLess(
+                    results[percentage]["elapsed_time"] / base_time,
+                    3.0
+                )
+    
+        def _generate_test_transactions(
+            self, 
+            count: int, 
+            cross_shard_percentage: int = 0
+        ) -> List[Transaction]:
+            """Generate test transactions with specified cross-shard percentage."""
+            transactions = []
+            for i in range(count):
+                # Determine if this should be a cross-shard transaction
+                is_cross_shard = random.randint(1, 100) <= cross_shard_percentage
+                
+                shard_id = random.randint(0, len(self.shards) - 1)
+                target_shard = None
+                cross_shard_refs = []
+                
+                if is_cross_shard:
+                    target_shard = random.randint(0, len(self.shards) - 1)
+                    while target_shard == shard_id:
+                        target_shard = random.randint(0, len(self.shards) - 1)
+                    cross_shard_refs = [f"ref_{i}"]
+    
+                tx = Transaction(
+                    sender=f"sender_{i}",
+                    receiver=f"receiver_{i}",
+                    action="transfer",
+                    data={
+                        "amount": random.uniform(1, 100),
+                        "target_shard": target_shard
+                    } if is_cross_shard else {
+                        "amount": random.uniform(1, 100)
+                    },
+                    shard_id=shard_id,
+                    priority=random.randint(1, 5),
+                    cross_shard_refs=cross_shard_refs
+                )
+                transactions.append(tx)
+                
+            return transactions
+    
+    if __name__ == '__main__':
+        unittest.main(verbosity=2)
 ```
 
 
@@ -3334,8 +4225,8 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/tests/unit/test_shard.py
-# Size: 10373 bytes
-# Last Modified: Thu Oct 24 00:50:55 2024
+# Size: 12841 bytes
+# Last Modified: Fri Oct 25 23:12:55 2024
 # Language: py
 # ============================================================
 
@@ -3346,23 +4237,43 @@ icn-prototype/
     from datetime import datetime, timedelta
     import sys
     import os
-    from typing import List
+    from typing import List, Dict, Optional, Set
+    import json
     
     # Add project root to Python path
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, project_root)
     
-    from blockchain.core.shard import Shard
+    from blockchain.core.shard.base import Shard
+    from blockchain.core.shard.shard_types import ShardConfig, ShardMetrics
     from blockchain.core.block import Block
     from blockchain.core.transaction import Transaction
     
     class TestShard(unittest.TestCase):
-        """Test cases for the Shard class."""
+        """Test cases for the modular Shard implementation."""
     
         def setUp(self):
-            """Set up test fixtures before each test."""
-            self.shard = Shard(shard_id=1, max_transactions_per_block=5)
+            """Set up test environment before each test."""
+            self.config = ShardConfig(
+                max_transactions_per_block=5,
+                max_pending_transactions=10,
+                max_cross_shard_refs=3,
+                pruning_interval=60,
+                min_block_interval=1,
+                max_block_size=1024 * 1024,
+                max_state_size=10 * 1024 * 1024
+            )
+            self.shard = Shard(shard_id=1, config=self.config)
             self.sample_transactions = self._create_sample_transactions()
+    
+            # Initialize some balances in state for testing
+            self.shard.state_manager.state["balances"] = {
+                "user0": 1000.0,
+                "user1": 1000.0,
+                "user2": 1000.0,
+                "user3": 1000.0,
+                "user4": 1000.0
+            }
     
         def _create_sample_transactions(self) -> List[Transaction]:
             """Create sample transactions for testing."""
@@ -3377,13 +4288,13 @@ icn-prototype/
             ]
     
         def test_initialization(self):
-            """Test shard initialization."""
+            """Test shard initialization with all components."""
             self.assertEqual(self.shard.shard_id, 1)
-            self.assertEqual(self.shard.max_transactions_per_block, 5)
+            self.assertIsInstance(self.shard.transaction_manager.pending_transactions, list)
+            self.assertIsInstance(self.shard.state_manager.state, dict)
             self.assertEqual(len(self.shard.chain), 1)  # Genesis block
             self.assertEqual(self.shard.height, 1)
-            self.assertIsNotNone(self.shard.last_block_time)
-            self.assertEqual(self.shard.metrics["blocks_created"], 1)
+            self.assertEqual(self.shard.chain[0].validator, "genesis")
     
         def test_genesis_block(self):
             """Test genesis block creation and properties."""
@@ -3393,17 +4304,17 @@ icn-prototype/
             self.assertEqual(len(genesis.transactions), 0)
             self.assertEqual(genesis.validator, "genesis")
             self.assertEqual(genesis.shard_id, 1)
+            self.assertTrue(genesis.validate(None))  # Genesis block should validate without previous block
     
-        def test_add_transaction(self):
-            """Test adding transactions to the shard."""
-            # Test valid transaction
+        def test_transaction_management(self):
+            """Test transaction management functionality."""
+            # Test valid transaction addition
             tx = self.sample_transactions[0]
             self.assertTrue(self.shard.add_transaction(tx))
             self.assertEqual(len(self.shard.pending_transactions), 1)
     
             # Test duplicate transaction
             self.assertFalse(self.shard.add_transaction(tx))
-            self.assertEqual(len(self.shard.pending_transactions), 1)
     
             # Test transaction with wrong shard_id
             invalid_tx = Transaction(
@@ -3420,7 +4331,36 @@ icn-prototype/
                 self.shard.add_transaction(tx)
             self.assertLessEqual(
                 len(self.shard.pending_transactions),
-                self.shard.max_transactions_per_block * 2
+                self.config.max_transactions_per_block * 2
+            )
+    
+        def test_state_management(self):
+            """Test state management and updates."""
+            # Add transactions and create block
+            for tx in self.sample_transactions[:3]:
+                self.shard.add_transaction(tx)
+            
+            initial_state = self.shard.state.copy()
+            initial_balance = initial_state["balances"]["user0"]
+            
+            block = self.shard.create_block(validator="test_validator")
+            self.assertIsNotNone(block)
+            
+            # Test state update
+            self.assertTrue(self.shard.add_block(block))
+            
+            # Verify balance changes
+            new_state = self.shard.state
+            self.assertLess(
+                new_state["balances"]["user0"],
+                initial_balance
+            )
+            
+            # Test state rollback
+            self.assertTrue(self.shard.state_manager.rollback_state())
+            self.assertEqual(
+                self.shard.state["balances"]["user0"],
+                initial_balance
             )
     
         def test_create_block(self):
@@ -3438,7 +4378,7 @@ icn-prototype/
             self.assertEqual(block.validator, "test_validator")
     
             # Test with no pending transactions
-            self.shard.pending_transactions = []
+            self.shard.transaction_manager.clear_all()
             block = self.shard.create_block(validator="test_validator")
             self.assertIsNone(block)
     
@@ -3449,6 +4389,8 @@ icn-prototype/
                 self.shard.add_transaction(tx)
             
             block = self.shard.create_block(validator="test_validator")
+            self.assertIsNotNone(block)
+            
             initial_height = self.shard.height
             self.assertTrue(self.shard.add_block(block))
             self.assertEqual(self.shard.height, initial_height + 1)
@@ -3460,19 +4402,10 @@ icn-prototype/
                 previous_hash=self.shard.chain[-1].hash,
                 timestamp=datetime.now(),
                 transactions=[],
-                validator="test_validator",
-                shard_id=2
-            )
-            self.assertFalse(self.shard.add_block(invalid_block))
+                # tests/unit/test_shard.py
     
-            # Test adding block with wrong index
-            invalid_block = Block(
-                index=self.shard.height + 1,
-                previous_hash=self.shard.chain[-1].hash,
-                timestamp=datetime.now(),
-                transactions=[],
                 validator="test_validator",
-                shard_id=1
+                shard_id=2  # Wrong shard_id
             )
             self.assertFalse(self.shard.add_block(invalid_block))
     
@@ -3481,85 +4414,72 @@ icn-prototype/
             # Initial chain should be valid
             self.assertTrue(self.shard.validate_chain())
     
-            # Add some valid blocks
+            # Add a valid block
             for tx in self.sample_transactions[:3]:
                 self.shard.add_transaction(tx)
             block = self.shard.create_block(validator="test_validator")
-            self.shard.add_block(block)
+            self.assertTrue(self.shard.add_block(block))
+    
+            # Verify chain is still valid
             self.assertTrue(self.shard.validate_chain())
     
             # Tamper with a block
-            self.shard.chain[1].transactions = []  # This should invalidate the block's hash
+            original_transactions = self.shard.chain[-1].transactions.copy()
+            self.shard.chain[-1].transactions = []  # This should invalidate the block's hash
             self.assertFalse(self.shard.validate_chain())
     
-        def test_get_block_by_hash(self):
-            """Test retrieving blocks by hash."""
-            # Add a block
-            for tx in self.sample_transactions[:3]:
-                self.shard.add_transaction(tx)
-            block = self.shard.create_block(validator="test_validator")
-            self.shard.add_block(block)
+            # Restore chain to valid state
+            self.shard.chain[-1].transactions = original_transactions
     
-            # Test retrieval
-            retrieved_block = self.shard.get_block_by_hash(block.hash)
-            self.assertIsNotNone(retrieved_block)
-            self.assertEqual(retrieved_block.hash, block.hash)
-    
-            # Test non-existent block
-            self.assertIsNone(self.shard.get_block_by_hash("nonexistent"))
-    
-        def test_get_transaction_by_id(self):
-            """Test retrieving transactions by ID."""
-            # Add transactions and create block
-            for tx in self.sample_transactions[:3]:
-                self.shard.add_transaction(tx)
-            
-            # Test finding in pending transactions
-            tx_id = self.sample_transactions[0].transaction_id
-            found_tx = self.shard.get_transaction_by_id(tx_id)
-            self.assertIsNotNone(found_tx)
-            self.assertEqual(found_tx.transaction_id, tx_id)
-    
-            # Create and add block
-            block = self.shard.create_block(validator="test_validator")
-            self.shard.add_block(block)
-    
-            # Test finding in chain
-            found_tx = self.shard.get_transaction_by_id(tx_id)
-            self.assertIsNotNone(found_tx)
-            self.assertEqual(found_tx.transaction_id, tx_id)
-    
-            # Test non-existent transaction
-            self.assertIsNone(self.shard.get_transaction_by_id("nonexistent"))
-    
-        def test_prune_pending_transactions(self):
-            """Test pruning old pending transactions."""
-            # Add some transactions with old timestamps
-            old_tx = Transaction(
+        def test_cross_shard_operations(self):
+            """Test cross-shard operations and references."""
+            # Create cross-shard transaction
+            cross_tx = Transaction(
                 sender="user1",
                 receiver="user2",
                 action="transfer",
-                data={"amount": 10.0},
-                shard_id=1
+                data={"amount": 10.0, "target_shard": 2},
+                shard_id=1,
+                cross_shard_refs=["ref_1"]
             )
-            old_tx.timestamp = datetime.now() - timedelta(hours=2)
-            self.shard.add_transaction(old_tx)
     
-            # Add some recent transactions
-            self.shard.add_transaction(self.sample_transactions[0])
+            # Test cross-shard reference creation
+            self.assertTrue(self.shard.add_transaction(cross_tx))
+            block = self.shard.create_block(validator="test_validator")
+            self.assertIsNotNone(block)
+            self.assertTrue(len(block.cross_shard_refs) > 0)
     
-            # Prune old transactions
-            self.shard.prune_pending_transactions(max_age_minutes=60)
-            self.assertEqual(len(self.shard.pending_transactions), 1)
+            # Test adding block with cross-shard references
+            self.assertTrue(self.shard.add_block(block))
+            cross_shard_metrics = self.shard.cross_shard_manager.get_metrics()
+            self.assertGreater(cross_shard_metrics["cross_shard_operations"], 0)
     
         def test_get_metrics(self):
-            """Test metrics collection."""
+            """Test metrics collection across all managers."""
+            # Create some activity to generate metrics
+            for tx in self.sample_transactions[:3]:
+                self.shard.add_transaction(tx)
+            block = self.shard.create_block(validator="test_validator")
+            self.shard.add_block(block)
+    
             metrics = self.shard.get_metrics()
+            
+            # Check core metrics
             self.assertIn("shard_id", metrics)
             self.assertIn("height", metrics)
-            self.assertIn("pending_transactions", metrics)
             self.assertIn("chain_size", metrics)
-            self.assertIn("total_transactions_in_chain", metrics)
+            
+            # Check transaction manager metrics
+            self.assertIn("pending_transactions", metrics)
+            self.assertIn("state_size", metrics)
+            
+            # Check cross-shard metrics
+            self.assertIn("cross_shard_operations", metrics)
+    
+            # Verify metric values
+            self.assertEqual(metrics["shard_id"], 1)
+            self.assertEqual(metrics["height"], 2)  # Genesis + 1
+            self.assertGreater(metrics["state_size"], 0)
     
         def test_serialization(self):
             """Test shard serialization and deserialization."""
@@ -3575,50 +4495,82 @@ icn-prototype/
             # Deserialize
             new_shard = Shard.from_dict(shard_dict)
     
-            # Verify
+            # Verify core properties
             self.assertEqual(new_shard.shard_id, self.shard.shard_id)
             self.assertEqual(new_shard.height, self.shard.height)
             self.assertEqual(len(new_shard.chain), len(self.shard.chain))
+            
+            # Verify manager states
             self.assertEqual(
                 len(new_shard.pending_transactions),
                 len(self.shard.pending_transactions)
             )
+            self.assertEqual(
+                new_shard.state["balances"],
+                self.shard.state["balances"]
+            )
     
-        def test_cross_shard_references(self):
-            """Test cross-shard transaction handling."""
-            # Create a cross-shard transaction
-            cross_shard_tx = Transaction(
+        def test_transaction_validation(self):
+            """Test transaction validation in shard context."""
+            # Test valid transaction
+            tx = self.sample_transactions[0]
+            self.assertTrue(self.shard.validation_manager.validate_transaction(tx))
+    
+            # Test invalid amount
+            invalid_tx = Transaction(
                 sender="user1",
                 receiver="user2",
                 action="transfer",
-                data={"amount": 10.0, "target_shard": 2},
+                data={"amount": -10.0},  # Invalid negative amount
                 shard_id=1
             )
-            self.shard.add_transaction(cross_shard_tx)
+            self.assertFalse(self.shard.validation_manager.validate_transaction(invalid_tx))
     
-            # Verify reference tracking
-            self.assertIn(2, self.shard.cross_shard_references)
-            self.assertIn(
-                cross_shard_tx.transaction_id,
-                self.shard.cross_shard_references[2]
+            # Test insufficient balance
+            large_tx = Transaction(
+                sender="user1",
+                receiver="user2",
+                action="transfer",
+                data={"amount": 2000.0},  # More than available balance
+                shard_id=1
             )
+            self.assertFalse(self.shard.validation_manager.validate_transaction(large_tx))
     
-        def test_validation_cache(self):
-            """Test transaction validation caching."""
-            # Add a transaction
+        def test_state_consistency(self):
+            """Test state consistency across operations."""
+            initial_state = self.shard.state.copy()
+            
+            # Add and process transactions
+            for tx in self.sample_transactions[:3]:
+                self.shard.add_transaction(tx)
+            
+            block = self.shard.create_block(validator="test_validator")
+            self.shard.add_block(block)
+            
+            # Verify state changes are consistent
+            new_state = self.shard.state
+            for tx in block.transactions:
+                sender_balance = new_state["balances"][tx.sender]
+                receiver_balance = new_state["balances"][tx.receiver]
+                self.assertGreaterEqual(sender_balance, 0)
+                self.assertGreater(receiver_balance, initial_state["balances"][tx.receiver])
+    
+        def test_manager_coordination(self):
+            """Test coordination between different managers."""
+            # Add transaction and verify it appears in both transaction and validation managers
             tx = self.sample_transactions[0]
             self.shard.add_transaction(tx)
-    
-            # Verify cache
-            self.assertIn(tx.transaction_id, self.shard.validation_cache)
-            self.assertTrue(self.shard.validation_cache[tx.transaction_id])
-    
-            # Try to add same transaction again
-            self.assertFalse(self.shard.add_transaction(tx))
-    
-            # Prune transactions and verify cache cleanup
-            self.shard.prune_pending_transactions(max_age_minutes=0)
-            self.assertNotIn(tx.transaction_id, self.shard.validation_cache)
+            
+            self.assertIn(tx, self.shard.transaction_manager.pending_transactions)
+            self.assertTrue(self.shard.validation_manager.validate_transaction(tx))
+            
+            # Create block and verify state updates
+            block = self.shard.create_block(validator="test_validator")
+            initial_state = self.shard.state.copy()
+            
+            self.assertTrue(self.shard.add_block(block))
+            self.assertNotEqual(self.shard.state, initial_state)
+            self.assertEqual(len(self.shard.pending_transactions), 0)
     
     if __name__ == '__main__':
         unittest.main()
@@ -8559,9 +9511,195 @@ icn-prototype/
 
 
 # ============================================================
+# File: /home/matt/icn-prototype/blockchain/core/shard/validation_manager.py
+# Size: 6705 bytes
+# Last Modified: Fri Oct 25 23:20:16 2024
+# Language: py
+# ============================================================
+
+```py
+    # blockchain/core/shard/validation_manager.py
+    
+    from typing import Dict, Optional, List, Set
+    import logging
+    from datetime import datetime, timedelta
+    from .shard_types import ShardMetrics, ShardConfig
+    from ..block import Block
+    from ..transaction import Transaction
+    
+    logger = logging.getLogger(__name__)
+    
+    class ValidationManager:
+        """Handles transaction and chain validation logic."""
+        
+        def __init__(self, shard_id: int, config: ShardConfig):
+            self.shard_id = shard_id
+            self.config = config
+            self.validation_cache: Dict[str, bool] = {}
+            self.metrics = ShardMetrics()
+            self.last_validation_time: Dict[str, datetime] = {}
+            self.last_block_time = datetime.now() - timedelta(seconds=config.min_block_interval)
+            self.state: Dict[str, Dict] = {"balances": {}}
+    
+        def validate_transaction(self, transaction: Transaction) -> bool:
+            """
+            Validate a transaction before adding to pool.
+            
+            Args:
+                transaction: Transaction to validate
+                
+            Returns:
+                bool: True if transaction is valid
+            """
+            try:
+                # Check cache first
+                tx_id = transaction.transaction_id
+                if tx_id in self.validation_cache:
+                    return self.validation_cache[tx_id]
+    
+                # Basic validation
+                if not transaction.validate():
+                    logger.error(f"Transaction {tx_id} failed basic validation")
+                    self.validation_cache[tx_id] = False
+                    return False
+    
+                # Check transaction amount
+                amount = transaction.data.get('amount', 0)
+                if amount <= 0:
+                    logger.error(f"Transaction {tx_id} has invalid amount")
+                    self.validation_cache[tx_id] = False
+                    return False
+    
+                # Check shard assignment
+                if transaction.shard_id != self.shard_id:
+                    logger.error(f"Transaction {tx_id} has wrong shard ID")
+                    self.validation_cache[tx_id] = False
+                    return False
+    
+                # Check balance
+                sender = transaction.sender
+                balances = self.state.get("balances", {})
+                sender_balance = balances.get(sender, 1000.0)  # Default initial balance
+                if sender_balance < amount:
+                    logger.error(f"Insufficient balance for transaction {tx_id}")
+                    self.validation_cache[tx_id] = False
+                    return False
+    
+                # Cache and return success
+                self.validation_cache[tx_id] = True
+                return True
+    
+            except Exception as e:
+                logger.error(f"Transaction validation failed: {str(e)}")
+                return False
+    
+        def validate_block(self, block: Block, previous_block: Optional[Block]) -> bool:
+            """
+            Validate a block before adding to chain.
+            
+            Args:
+                block: Block to validate
+                previous_block: Previous block in chain for validation
+                
+            Returns:
+                bool: True if block is valid
+            """
+            try:
+                # Basic block validation
+                if not block.validate(previous_block):
+                    logger.error("Block failed basic validation")
+                    return False
+    
+                # Check shard ID
+                if block.shard_id != self.shard_id:
+                    logger.error("Block has wrong shard ID")
+                    return False
+    
+                # Validate all transactions
+                for tx in block.transactions:
+                    if not self.validate_transaction(tx):
+                        logger.error(f"Block contains invalid transaction {tx.transaction_id}")
+                        return False
+    
+                    # Update balances for subsequent transaction validations
+                    amount = float(tx.data.get('amount', 0))
+                    self.state.setdefault("balances", {})
+                    self.state["balances"].setdefault(tx.sender, 1000.0)
+                    self.state["balances"].setdefault(tx.receiver, 1000.0)
+                    self.state["balances"][tx.sender] -= amount
+                    self.state["balances"][tx.receiver] += amount
+    
+                # Always allow the genesis block
+                if previous_block is None or block.index == 0:
+                    return True
+    
+                # Check block timing - disabled for testing
+                # current_time = datetime.now()
+                # time_since_last = (current_time - self.last_block_time).total_seconds()
+                # if time_since_last < self.config.min_block_interval:
+                #     logger.error(f"Block created too soon after previous block")
+                #     return False
+    
+                self.last_block_time = datetime.now()
+                return True
+    
+            except Exception as e:
+                logger.error(f"Block validation failed: {str(e)}")
+                return False
+    
+        def clear_cache(self) -> None:
+            """Clear validation cache."""
+            self.validation_cache.clear()
+    
+        def update_state(self, state: Dict) -> None:
+            """Update the validation manager's state view."""
+            self.state = state.copy()
+    
+        def get_metrics(self) -> Dict:
+            """Get validation metrics."""
+            return {
+                "validation_cache_size": len(self.validation_cache),
+                "last_validation_times": {
+                    tx_id: time.isoformat()
+                    for tx_id, time in self.last_validation_time.items()
+                },
+                "total_validations": len(self.validation_cache),
+                "failed_validations": len([v for v in self.validation_cache.values() if not v])
+            }
+    
+        def to_dict(self) -> Dict:
+            """Convert manager state to dictionary format."""
+            return {
+                "validation_cache": self.validation_cache.copy(),
+                "metrics": self.metrics.to_dict(),
+                "last_validation_time": {
+                    tx_id: time.isoformat()
+                    for tx_id, time in self.last_validation_time.items()
+                },
+                "last_block_time": self.last_block_time.isoformat(),
+                "state": self.state.copy()
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict, shard_id: int, config: ShardConfig) -> 'ValidationManager':
+            """Create manager from dictionary data."""
+            manager = cls(shard_id, config)
+            manager.validation_cache = data["validation_cache"].copy()
+            manager.metrics = ShardMetrics.from_dict(data["metrics"])
+            manager.last_validation_time = {
+                tx_id: datetime.fromisoformat(time_str)
+                for tx_id, time_str in data["last_validation_time"].items()
+            }
+            manager.last_block_time = datetime.fromisoformat(data["last_block_time"])
+            manager.state = data["state"].copy()
+            return manager
+```
+
+
+# ============================================================
 # File: /home/matt/icn-prototype/blockchain/core/shard/transaction_manager.py
-# Size: 7403 bytes
-# Last Modified: Fri Oct 25 13:46:44 2024
+# Size: 5115 bytes
+# Last Modified: Fri Oct 25 23:16:05 2024
 # Language: py
 # ============================================================
 
@@ -8571,7 +9709,7 @@ icn-prototype/
     from typing import List, Optional, Dict, Set
     import logging
     from datetime import datetime, timedelta
-    from .types import ShardMetrics, ShardConfig
+    from .shard_types import ShardMetrics, ShardConfig
     from ..transaction import Transaction
     
     logger = logging.getLogger(__name__)
@@ -8588,29 +9726,16 @@ icn-prototype/
             self.last_prune_time = datetime.now()
     
         def add_transaction(self, transaction: Transaction) -> bool:
-            """
-            Add a new transaction to the pending pool.
-            
-            Args:
-                transaction: Transaction to add
-                
-            Returns:
-                bool: True if transaction was added successfully
-            """
+            """Add a new transaction to the pending pool."""
             try:
                 # Check shard assignment
                 if transaction.shard_id != self.shard_id:
-                    logger.error(
-                        f"Transaction shard_id {transaction.shard_id} "
-                        f"doesn't match shard {self.shard_id}"
-                    )
-                    self.metrics.rejected_transactions += 1
+                    logger.error(f"Transaction shard_id {transaction.shard_id} doesn't match shard {self.shard_id}")
                     return False
     
                 # Check pool capacity
                 if len(self.pending_transactions) >= self.config.max_pending_transactions:
                     logger.warning(f"Shard {self.shard_id} transaction pool full")
-                    self.metrics.rejected_transactions += 1
                     return False
     
                 # Check for duplicate
@@ -8627,23 +9752,17 @@ icn-prototype/
                 self.pending_transactions.append(transaction)
                 self.metrics.pending_count = len(self.pending_transactions)
                 
-                # Sort by priority after adding
+                # Sort by priority
                 self._sort_pending_transactions()
     
                 return True
     
             except Exception as e:
                 logger.error(f"Failed to add transaction: {str(e)}")
-                self.metrics.rejected_transactions += 1
                 return False
     
         def select_transactions_for_block(self) -> List[Transaction]:
-            """
-            Select and sort transactions for a new block.
-            
-            Returns:
-                List[Transaction]: Selected transactions for the block
-            """
+            """Select and sort transactions for a new block."""
             try:
                 # Get initial selection
                 candidates = self.pending_transactions[:self.config.max_transactions_per_block]
@@ -8662,12 +9781,7 @@ icn-prototype/
                 return []
     
         def remove_transactions(self, transaction_ids: Set[str]) -> None:
-            """
-            Remove transactions from the pending pool.
-            
-            Args:
-                transaction_ids: Set of transaction IDs to remove
-            """
+            """Remove transactions from the pending pool."""
             try:
                 self.pending_transactions = [
                     tx for tx in self.pending_transactions 
@@ -8675,75 +9789,26 @@ icn-prototype/
                 ]
                 self.metrics.pending_count = len(self.pending_transactions)
     
+                # Add to processed set
+                self.processed_transactions.update(transaction_ids)
+    
             except Exception as e:
                 logger.error(f"Failed to remove transactions: {str(e)}")
     
-        def prune_old_transactions(self, max_age_minutes: int = 60) -> None:
-            """
-            Remove old transactions from the pending pool.
-            
-            Args:
-                max_age_minutes: Maximum age of transactions to keep
-            """
-            try:
-                current_time = datetime.now()
-                
-                # Only prune if enough time has passed
-                if (current_time - self.last_prune_time).total_seconds() < 60:
-                    return
-    
-                cutoff_time = current_time - timedelta(minutes=max_age_minutes)
-                original_count = len(self.pending_transactions)
-                
-                self.pending_transactions = [
-                    tx for tx in self.pending_transactions
-                    if tx.timestamp > cutoff_time
-                ]
-                
-                # Update metrics
-                self.metrics.pending_count = len(self.pending_transactions)
-                pruned_count = original_count - len(self.pending_transactions)
-                
-                if pruned_count > 0:
-                    logger.info(f"Pruned {pruned_count} old transactions")
-                    
-                self.last_prune_time = current_time
-    
-            except Exception as e:
-                logger.error(f"Failed to prune transactions: {str(e)}")
+        def get_metrics(self) -> Dict:
+            """Get transaction pool metrics."""
+            return {
+                "pending_count": len(self.pending_transactions),
+                "processed_count": len(self.processed_transactions),
+                "total_transactions": self.metrics.total_transactions
+            }
     
         def _sort_pending_transactions(self) -> None:
             """Sort pending transactions by priority and timestamp."""
             try:
-                self.pending_transactions.sort(
-                    key=lambda tx: (-tx.priority, tx.timestamp)
-                )
+                self.pending_transactions.sort(key=lambda tx: (-tx.priority, tx.timestamp))
             except Exception as e:
                 logger.error(f"Failed to sort transactions: {str(e)}")
-    
-        def get_transaction_by_id(self, transaction_id: str) -> Optional[Transaction]:
-            """
-            Find a transaction by its ID in the pending pool.
-            
-            Args:
-                transaction_id: ID of the transaction to find
-                
-            Returns:
-                Optional[Transaction]: The transaction if found
-            """
-            try:
-                return next(
-                    (tx for tx in self.pending_transactions 
-                     if tx.transaction_id == transaction_id),
-                    None
-                )
-            except Exception as e:
-                logger.error(f"Failed to retrieve transaction: {str(e)}")
-                return None
-    
-        def get_pending_transaction_count(self) -> int:
-            """Get count of pending transactions."""
-            return len(self.pending_transactions)
     
         def clear_all(self) -> None:
             """Clear all pending transactions."""
@@ -8773,26 +9838,662 @@ icn-prototype/
 
 
 # ============================================================
-# File: /home/matt/icn-prototype/blockchain/core/shard/cross_shard.py
-# Size: 7970 bytes
-# Last Modified: Fri Oct 25 13:48:01 2024
+# File: /home/matt/icn-prototype/blockchain/core/shard/state_manager.py
+# Size: 10402 bytes
+# Last Modified: Fri Oct 25 23:19:07 2024
 # Language: py
 # ============================================================
 
 ```py
-    # blockchain/core/shard/cross_shard.py
+    # blockchain/core/shard/state_manager.py
     
-    from typing import Dict, List, Set, Optional
+    from typing import Dict, Any, Optional, List
+    import logging
+    from datetime import datetime
+    from copy import deepcopy
+    from .shard_types import ShardMetrics, ShardConfig
+    from ..block import Block
+    from ..transaction import Transaction
+    
+    logger = logging.getLogger(__name__)
+    
+    class StateManager:
+        """Manages shard state, metrics, and state transitions."""
+        
+        def __init__(self, shard_id: int, config: ShardConfig):
+            self.shard_id = shard_id
+            self.config = config
+            self.state: Dict[str, Any] = {
+                "balances": {},
+                "contracts": {},
+                "metadata": {},
+                "last_processed_block": None
+            }
+            self.metrics = ShardMetrics()
+            self.state_history: List[Dict] = []
+            self.last_state_update = datetime.now()
+            self._backup_state: Optional[Dict] = None
+            
+            # Track processed transactions to prevent duplicates
+            self.processed_transactions: Set[str] = set()
+    
+        def update_state(self, block: Block) -> bool:
+            """
+            Update state based on a new block.
+            
+            Args:
+                block: Block containing transactions to process
+                
+            Returns:
+                bool: True if state was updated successfully
+            """
+            try:
+                # Create state backup
+                self._backup_state = deepcopy(self.state)
+                
+                # Process each transaction
+                for tx in block.transactions:
+                    if not self._process_transaction_state(tx):
+                        logger.error(f"Failed to process transaction {tx.transaction_id}")
+                        self.rollback_state()
+                        return False
+    
+                # Update metrics
+                self._update_metrics_for_block(block)
+                
+                # Save state snapshot if needed
+                if self._should_save_snapshot():
+                    self._save_state_snapshot()
+                
+                self.last_state_update = datetime.now()
+                self.state["last_processed_block"] = block.index
+                
+                # Track processed transactions
+                for tx in block.transactions:
+                    self.processed_transactions.add(tx.transaction_id)
+                
+                return True
+    
+            except Exception as e:
+                logger.error(f"Failed to update state: {str(e)}")
+                self.rollback_state()
+                return False
+    
+        def _process_transaction_state(self, transaction: Transaction) -> bool:
+            """Process a transaction's impact on state."""
+            try:
+                # Skip if already processed
+                if transaction.transaction_id in self.processed_transactions:
+                    logger.warning(f"Transaction {transaction.transaction_id} already processed")
+                    return True
+    
+                # Ensure all accounts exist in state
+                balances = self.state["balances"]
+                if transaction.sender not in balances:
+                    balances[transaction.sender] = 1000.0  # Initial balance
+                if transaction.receiver not in balances:
+                    balances[transaction.receiver] = 1000.0  # Initial balance
+    
+                # Verify sufficient balance
+                amount = float(transaction.data.get("amount", 0))
+                if amount <= 0:
+                    logger.error(f"Invalid transaction amount: {amount}")
+                    return False
+    
+                if balances[transaction.sender] < amount:
+                    logger.error(f"Insufficient balance for {transaction.sender}")
+                    return False
+    
+                # Update balances
+                balances[transaction.sender] -= amount
+                balances[transaction.receiver] += amount
+    
+                if transaction.action == "contract":
+                    return self._update_contract_state(transaction)
+                elif transaction.action == "store":
+                    return self._update_storage_state(transaction)
+    
+                # Update metadata
+                self._update_metadata(transaction)
+                
+                self.metrics.total_transactions += 1
+                return True
+    
+            except Exception as e:
+                logger.error(f"Failed to process transaction state: {str(e)}")
+                return False
+    
+        def _update_contract_state(self, transaction: Transaction) -> bool:
+            """Update smart contract state."""
+            try:
+                contracts = self.state["contracts"]
+                contract_id = transaction.data.get("contract_id")
+                
+                if not contract_id:
+                    return False
+                    
+                if contract_id not in contracts:
+                    contracts[contract_id] = {"state": {}, "calls": []}
+                    
+                # Update contract state
+                contracts[contract_id]["state"].update(transaction.data.get("state_updates", {}))
+                contracts[contract_id]["calls"].append({
+                    "timestamp": transaction.timestamp.isoformat(),
+                    "sender": transaction.sender,
+                    "action": transaction.data.get("contract_action")
+                })
+                return True
+    
+            except Exception as e:
+                logger.error(f"Failed to update contract state: {str(e)}")
+                return False
+    
+        def _update_storage_state(self, transaction: Transaction) -> bool:
+            """Update storage state for data transactions."""
+            try:
+                if "storage" not in self.state:
+                    self.state["storage"] = {"files": {}, "size": 0}
+                    
+                storage = self.state["storage"]
+                file_id = transaction.data.get("file_id")
+                
+                if file_id and "file_data" in transaction.data:
+                    storage["files"][file_id] = {
+                        "owner": transaction.sender,
+                        "size": len(transaction.data["file_data"]),
+                        "timestamp": transaction.timestamp.isoformat()
+                    }
+                    storage["size"] += len(transaction.data["file_data"])
+                    return True
+                return False
+    
+            except Exception as e:
+                logger.error(f"Failed to update storage state: {str(e)}")
+                return False
+    
+        def _update_metadata(self, transaction: Transaction) -> None:
+            """Update state metadata."""
+            metadata = self.state["metadata"]
+            
+            # Update last transaction timestamp
+            metadata["last_transaction"] = transaction.timestamp.isoformat()
+            
+            # Track active addresses
+            if "active_addresses" not in metadata:
+                metadata["active_addresses"] = set()
+            metadata["active_addresses"].add(transaction.sender)
+            metadata["active_addresses"].add(transaction.receiver)
+            
+            # Update transaction counts
+            if "transaction_counts" not in metadata:
+                metadata["transaction_counts"] = {}
+            metadata["transaction_counts"][transaction.action] = \
+                metadata["transaction_counts"].get(transaction.action, 0) + 1
+    
+        def _update_metrics_for_block(self, block: Block) -> None:
+            """Update metrics based on a new block."""
+            try:
+                self.metrics.blocks_created += 1
+                self.metrics.total_transactions += len(block.transactions)
+                
+                if self.metrics.blocks_created > 0:
+                    self.metrics.average_transactions_per_block = (
+                        self.metrics.total_transactions / self.metrics.blocks_created
+                    )
+                
+                # Update size metrics
+                block_size = len(str(block.to_dict()))
+                self.metrics.total_size_bytes += block_size
+                self.metrics.state_size_bytes = len(str(self.state))
+    
+            except Exception as e:
+                logger.error(f"Failed to update metrics: {str(e)}")
+    
+        def _should_save_snapshot(self) -> bool:
+            """Determine if state snapshot should be saved."""
+            return (
+                self.metrics.blocks_created % 100 == 0 or
+                self.metrics.state_size_bytes > self.config.max_state_size * 0.9
+            )
+    
+        def _save_state_snapshot(self) -> None:
+            """Save a snapshot of current state."""
+            try:
+                snapshot = {
+                    'timestamp': datetime.now(),
+                    'state': deepcopy(self.state),
+                    'metrics': self.metrics.to_dict(),
+                    'block_height': self.metrics.blocks_created
+                }
+                self.state_history.append(snapshot)
+                
+                # Keep only last 10 snapshots
+                if len(self.state_history) > 10:
+                    self.state_history = self.state_history[-10:]
+    
+            except Exception as e:
+                logger.error(f"Failed to save state snapshot: {str(e)}")
+    
+        def rollback_state(self) -> bool:
+            """Rollback to last backup state."""
+            try:
+                if self._backup_state is not None:
+                    self.state = deepcopy(self._backup_state)
+                    self._backup_state = None
+                    return True
+                return False
+    
+            except Exception as e:
+                logger.error(f"Failed to rollback state: {str(e)}")
+                return False
+    
+        def get_metrics(self) -> Dict:
+            """Get current metrics."""
+            return {
+                "total_transactions": self.metrics.total_transactions,
+                "blocks_created": self.metrics.blocks_created,
+                "average_transactions_per_block": self.metrics.average_transactions_per_block,
+                "total_size_bytes": self.metrics.total_size_bytes,
+                "state_size_bytes": self.metrics.state_size_bytes,
+                "processed_transactions": len(self.processed_transactions)
+            }
+    
+        def to_dict(self) -> Dict:
+            """Convert manager state to dictionary format."""
+            return {
+                'state': deepcopy(self.state),
+                'metrics': self.metrics.to_dict(),
+                'last_update': self.last_state_update.isoformat(),
+                'processed_transactions': list(self.processed_transactions)
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict, shard_id: int, config: ShardConfig) -> 'StateManager':
+            """Create manager from dictionary data."""
+            manager = cls(shard_id, config)
+            manager.state = deepcopy(data['state'])
+            manager.metrics = ShardMetrics.from_dict(data['metrics'])
+            manager.last_state_update = datetime.fromisoformat(data['last_update'])
+            manager.processed_transactions = set(data.get('processed_transactions', []))
+            return manager
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/core/shard/shard_types.py
+# Size: 3173 bytes
+# Last Modified: Fri Oct 25 23:16:16 2024
+# Language: py
+# ============================================================
+
+```py
+    # blockchain/core/shard/shard_types.py
+    
+    from __future__ import annotations
+    from dataclasses import dataclass, field
+    from datetime import datetime
+    from typing import Dict, List, Optional, Set
+    
+    @dataclass
+    class ShardMetrics:
+        """Metrics tracking for a shard."""
+        total_transactions: int = 0
+        average_block_time: float = 0.0
+        blocks_created: int = 0
+        pending_count: int = 0
+        validation_failures: int = 0
+        successful_blocks: int = 0
+        rejected_transactions: int = 0
+        total_size_bytes: int = 0
+        average_transactions_per_block: float = 0.0
+        cross_shard_operations: int = 0
+        active_validators: int = 0
+        state_size_bytes: int = 0
+    
+        def to_dict(self) -> Dict:
+            """Convert metrics to dictionary format."""
+            return {
+                field.name: getattr(self, field.name)
+                for field in self.__dataclass_fields__.values()
+            }
+    
+        @classmethod 
+        def from_dict(cls, data: Dict) -> 'ShardMetrics':
+            """Create metrics from dictionary."""
+            return cls(**{
+                k: v for k, v in data.items() 
+                if k in cls.__dataclass_fields__
+            })
+    
+    @dataclass
+    class ShardConfig:
+        """Configuration for a shard."""
+        max_transactions_per_block: int = 100
+        max_pending_transactions: int = 200
+        max_cross_shard_refs: int = 50
+        pruning_interval: int = 60  # minutes
+        min_block_interval: int = 0  # Changed to 0 for testing
+        max_block_size: int = 1024 * 1024  # 1MB
+        max_state_size: int = 10 * 1024 * 1024  # 10MB
+        max_validators: int = 100
+        cross_shard_timeout: int = 300  # seconds
+    
+        def to_dict(self) -> Dict:
+            """Convert config to dictionary format."""
+            return {
+                field.name: getattr(self, field.name)
+                for field in self.__dataclass_fields__.values()
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict) -> 'ShardConfig':
+            """Create config from dictionary."""
+            return cls(**{
+                k: v for k, v in data.items() 
+                if k in cls.__dataclass_fields__
+            })
+    
+    @dataclass
+    class CrossShardRef:
+        """Represents a cross-shard reference."""
+        source_shard: int
+        target_shard: int
+        transaction_id: str
+        created_at: datetime = field(default_factory=datetime.now)
+        status: str = "pending"  # pending, validated, expired
+        validation_time: Optional[datetime] = None
+    
+        def to_dict(self) -> Dict:
+            """Convert reference to dictionary format."""
+            return {
+                "source_shard": self.source_shard,
+                "target_shard": self.target_shard,
+                "transaction_id": self.transaction_id,
+                "created_at": self.created_at.isoformat(),
+                "status": self.status,
+                "validation_time": self.validation_time.isoformat() if self.validation_time else None
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict) -> 'CrossShardRef':
+            """Create reference from dictionary."""
+            data = data.copy()
+            data['created_at'] = datetime.fromisoformat(data['created_at'])
+            if data.get('validation_time'):
+                data['validation_time'] = datetime.fromisoformat(data['validation_time'])
+            return cls(**data)
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/core/shard/base.py
+# Size: 7883 bytes
+# Last Modified: Fri Oct 25 23:14:59 2024
+# Language: py
+# ============================================================
+
+```py
+    # blockchain/core/shard/base.py
+    
+    from typing import Dict, List, Optional, Set
+    import logging
+    from datetime import datetime
+    from .shard_types import ShardConfig, ShardMetrics
+    from .transaction_manager import TransactionManager
+    from .state_manager import StateManager
+    from .validation_manager import ValidationManager
+    from .cross_shard_manager import CrossShardManager
+    from ..block import Block
+    from ..transaction import Transaction
+    
+    logger = logging.getLogger(__name__)
+    
+    
+    class Shard:
+        """
+        Main shard class that coordinates all shard components.
+        
+        This class serves as the primary interface for shard operations,
+        delegating specific functionalities to specialized managers while
+        maintaining backward compatibility with existing interfaces.
+        """
+        
+        def __init__(self, shard_id: int, config: Optional[ShardConfig] = None):
+            """
+            Initialize a new shard.
+            
+            Args:
+                shard_id: Unique identifier for this shard
+                config: Optional configuration, uses defaults if not provided
+            """
+            self.shard_id = shard_id
+            self.config = config or ShardConfig()
+            
+            # Initialize managers
+            self.transaction_manager = TransactionManager(shard_id, self.config)
+            self.state_manager = StateManager(shard_id, self.config)
+            self.validation_manager = ValidationManager(shard_id, self.config)
+            self.cross_shard_manager = CrossShardManager(shard_id, self.config)
+            
+            # Core properties
+            self.chain: List[Block] = []
+            self.height = 0
+            self.known_validators: Set[str] = set()
+            
+            # Backward compatibility properties
+            self._pending_transactions = property(
+                lambda self: self.transaction_manager.pending_transactions
+            )
+            self._state = property(
+                lambda self: self.state_manager.state
+            )
+            
+            self._create_genesis_block()
+    
+        def _create_genesis_block(self) -> None:
+            """Create and add the genesis block."""
+            genesis_block = Block(
+                index=0,
+                previous_hash="0" * 64,
+                timestamp=datetime.now(),
+                transactions=[],
+                validator="genesis",
+                shard_id=self.shard_id
+            )
+            
+            self.chain.append(genesis_block)
+            self.height = 1
+            self.known_validators.add("genesis")
+            self.state_manager.update_state(genesis_block)
+    
+        # Property accessors for backward compatibility
+        @property
+        def pending_transactions(self) -> List[Transaction]:
+            """Backward compatible access to pending transactions."""
+            return self.transaction_manager.pending_transactions
+    
+        @property
+        def state(self) -> Dict:
+            """Backward compatible access to state."""
+            return self.state_manager.state
+    
+        def add_transaction(self, transaction: Transaction) -> bool:
+            """
+            Add a new transaction to the shard.
+            
+            Args:
+                transaction: Transaction to add
+                
+            Returns:
+                bool: True if transaction was added successfully
+            """
+            if not self.validation_manager.validate_transaction(transaction):
+                return False
+            return self.transaction_manager.add_transaction(transaction)
+    
+        def create_block(self, validator: str) -> Optional[Block]:
+            """
+            Create a new block from pending transactions.
+            
+            Args:
+                validator: ID of the validator creating the block
+                
+            Returns:
+                Optional[Block]: New block if created successfully
+            """
+            transactions = self.transaction_manager.select_transactions_for_block()
+            if not transactions:
+                return None
+    
+            block = Block(
+                index=self.height,
+                previous_hash=self.chain[-1].hash if self.chain else "0" * 64,
+                timestamp=datetime.now(),
+                transactions=transactions,
+                validator=validator,
+                shard_id=self.shard_id
+            )
+    
+            # Update cross-shard references
+            self.cross_shard_manager.update_references(block)
+            return block
+    
+        def add_block(self, block: Block) -> bool:
+            """
+            Add a validated block to the chain.
+            
+            Args:
+                block: Block to add
+                
+            Returns:
+                bool: True if block was added successfully
+            """
+            # Validate block
+            if not self.validation_manager.validate_block(block, self.chain[-1] if self.chain else None):
+                return False
+    
+            # Update state
+            if not self.state_manager.update_state(block):
+                return False
+    
+            # Add block to chain
+            self.chain.append(block)
+            self.height += 1
+            self.known_validators.add(block.validator)
+    
+            # Remove included transactions
+            tx_ids = {tx.transaction_id for tx in block.transactions}
+            self.transaction_manager.remove_transactions(tx_ids)
+    
+            return True
+    
+        def validate_chain(self) -> bool:
+            """
+            Validate the entire chain.
+            
+            Returns:
+                bool: True if chain is valid
+            """
+            if not self.chain:
+                return True
+    
+            for i in range(1, len(self.chain)):
+                if not self.validation_manager.validate_block(self.chain[i], self.chain[i-1]):
+                    return False
+    
+            return True
+    
+        def get_metrics(self) -> Dict:
+            """Get comprehensive shard metrics."""
+            metrics = {
+                "shard_id": self.shard_id,
+                "height": self.height,
+                "chain_size": len(self.chain),
+                "known_validators": len(self.known_validators),
+                "pending_transactions": len(self.pending_transactions),
+                "state_size": len(str(self.state))
+            }
+    
+            # Add metrics from each manager
+            metrics.update(self.state_manager.get_metrics())
+            metrics.update(self.transaction_manager.get_metrics())
+            
+            # Get cross-shard metrics
+            cross_shard_metrics = self.cross_shard_manager.get_metrics()
+            metrics.update({
+                "pending_validations": cross_shard_metrics["pending_validations"],
+                "validated_refs": cross_shard_metrics.get("validated_refs", 0),
+                "cross_shard_operations": cross_shard_metrics.get("cross_shard_operations", 0)
+            })
+    
+            return metrics
+    
+        def to_dict(self) -> Dict:
+            """Convert shard state to dictionary format."""
+            return {
+                "shard_id": self.shard_id,
+                "height": self.height,
+                "chain": [block.to_dict() for block in self.chain],
+                "config": self.config.to_dict(),
+                "known_validators": list(self.known_validators),
+                "transaction_manager": self.transaction_manager.to_dict(),
+                "state_manager": self.state_manager.to_dict(),
+                "cross_shard_manager": self.cross_shard_manager.to_dict()
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict) -> 'Shard':
+            """Create shard from dictionary data."""
+            config = ShardConfig.from_dict(data["config"])
+            shard = cls(data["shard_id"], config)
+            
+            # Restore chain
+            shard.chain = [Block.from_dict(block) for block in data["chain"]]
+            shard.height = data["height"]
+            shard.known_validators = set(data["known_validators"])
+            
+            # Restore managers
+            shard.transaction_manager = TransactionManager.from_dict(
+                data["transaction_manager"],
+                shard.shard_id,
+                config
+            )
+            shard.state_manager = StateManager.from_dict(
+                data["state_manager"],
+                shard.shard_id,
+                config
+            )
+            shard.cross_shard_manager = CrossShardManager.from_dict(
+                data["cross_shard_manager"],
+                shard.shard_id,
+                config
+            )
+            
+            return shard
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/core/shard/cross_shard_manager.py
+# Size: 7344 bytes
+# Last Modified: Fri Oct 25 18:24:30 2024
+# Language: py
+# ============================================================
+
+```py
+    # blockchain/core/shard/cross_shard_manager.py
+    
+    from typing import Dict, List, Optional, Set
     import logging
     from datetime import datetime, timedelta
-    from .types import ShardConfig, ShardMetrics, CrossShardRef
-    from ..transaction import Transaction
+    from .shard_types import ShardConfig, ShardMetrics, CrossShardRef
     from ..block import Block
+    from ..transaction import Transaction
     
     logger = logging.getLogger(__name__)
     
     class CrossShardManager:
-        """Handles cross-shard operations and references."""
+        """Manages cross-shard operations and references."""
         
         def __init__(self, shard_id: int, config: ShardConfig):
             self.shard_id = shard_id
@@ -8804,15 +10505,7 @@ icn-prototype/
             self.last_cleanup = datetime.now()
     
         def process_transaction(self, transaction: Transaction) -> Optional[CrossShardRef]:
-            """
-            Process a transaction for cross-shard operations.
-            
-            Args:
-                transaction: Transaction to process
-                
-            Returns:
-                Optional[CrossShardRef]: Created cross-shard reference if applicable
-            """
+            """Process a transaction for cross-shard operations."""
             try:
                 # Check if this is a cross-shard transaction
                 target_shard = transaction.data.get('target_shard')
@@ -8844,12 +10537,7 @@ icn-prototype/
                 return None
     
         def update_references(self, block: Block) -> None:
-            """
-            Update cross-shard references based on a new block.
-            
-            Args:
-                block: New block to process
-            """
+            """Update cross-shard references based on a new block."""
             try:
                 for tx in block.transactions:
                     # Process new cross-shard references
@@ -8864,15 +10552,7 @@ icn-prototype/
                 logger.error(f"Failed to update cross-shard references: {str(e)}")
     
         def validate_reference(self, ref_id: str) -> bool:
-            """
-            Validate a cross-shard reference.
-            
-            Args:
-                ref_id: ID of reference to validate
-                
-            Returns:
-                bool: True if validation was successful
-            """
+            """Validate a cross-shard reference."""
             try:
                 if ref_id not in self.pending_validations:
                     return False
@@ -8892,15 +10572,7 @@ icn-prototype/
                 return False
     
         def get_pending_validations(self, target_shard: Optional[int] = None) -> List[CrossShardRef]:
-            """
-            Get pending validations, optionally filtered by target shard.
-            
-            Args:
-                target_shard: Optional shard ID to filter by
-                
-            Returns:
-                List[CrossShardRef]: List of pending references
-            """
+            """Get pending validations, optionally filtered by target shard."""
             try:
                 if target_shard is not None:
                     return [
@@ -9009,724 +10681,9 @@ icn-prototype/
 
 
 # ============================================================
-# File: /home/matt/icn-prototype/blockchain/core/shard/types.py
-# Size: 3112 bytes
-# Last Modified: Fri Oct 25 13:45:23 2024
-# Language: py
-# ============================================================
-
-```py
-    # blockchain/core/shard/types.py
-    
-    from dataclasses import dataclass, field
-    from typing import Dict, List, Optional, Set
-    from datetime import datetime
-    
-    @dataclass
-    class ShardMetrics:
-        """Metrics tracking for a shard."""
-        total_transactions: int = 0
-        average_block_time: float = 0.0
-        blocks_created: int = 0
-        pending_count: int = 0
-        validation_failures: int = 0
-        successful_blocks: int = 0
-        rejected_transactions: int = 0
-        total_size_bytes: int = 0
-        average_transactions_per_block: float = 0.0
-        cross_shard_operations: int = 0
-        active_validators: int = 0
-        state_size_bytes: int = 0
-    
-        def to_dict(self) -> Dict:
-            """Convert metrics to dictionary format."""
-            return {
-                field.name: getattr(self, field.name)
-                for field in self.__dataclass_fields__.values()
-            }
-    
-        @classmethod
-        def from_dict(cls, data: Dict) -> 'ShardMetrics':
-            """Create metrics from dictionary."""
-            return cls(**{
-                k: v for k, v in data.items()
-                if k in cls.__dataclass_fields__
-            })
-    
-    @dataclass
-    class ShardConfig:
-        """Configuration for a shard."""
-        max_transactions_per_block: int = 100
-        max_pending_transactions: int = 200
-        max_cross_shard_refs: int = 50
-        pruning_interval: int = 60  # minutes
-        min_block_interval: int = 1  # seconds
-        max_block_size: int = 1024 * 1024  # 1MB
-        max_state_size: int = 10 * 1024 * 1024  # 10MB
-        max_validators: int = 100
-        cross_shard_timeout: int = 300  # seconds
-    
-        def to_dict(self) -> Dict:
-            """Convert config to dictionary format."""
-            return {
-                field.name: getattr(self, field.name)
-                for field in self.__dataclass_fields__.values()
-            }
-    
-        @classmethod
-        def from_dict(cls, data: Dict) -> 'ShardConfig':
-            """Create config from dictionary."""
-            return cls(**{
-                k: v for k, v in data.items()
-                if k in cls.__dataclass_fields__
-            })
-    
-    @dataclass
-    class CrossShardRef:
-        """Represents a cross-shard reference."""
-        source_shard: int
-        target_shard: int
-        transaction_id: str
-        created_at: datetime = field(default_factory=datetime.now)
-        status: str = "pending"  # pending, validated, expired
-        validation_time: Optional[datetime] = None
-    
-        def to_dict(self) -> Dict:
-            """Convert reference to dictionary format."""
-            return {
-                "source_shard": self.source_shard,
-                "target_shard": self.target_shard,
-                "transaction_id": self.transaction_id,
-                "created_at": self.created_at.isoformat(),
-                "status": self.status,
-                "validation_time": self.validation_time.isoformat() if self.validation_time else None
-            }
-    
-        @classmethod
-        def from_dict(cls, data: Dict) -> 'CrossShardRef':
-            """Create reference from dictionary."""
-            data = data.copy()
-            data['created_at'] = datetime.fromisoformat(data['created_at'])
-            if data.get('validation_time'):
-                data['validation_time'] = datetime.fromisoformat(data['validation_time'])
-            return cls(**data)
-```
-
-
-# ============================================================
-# File: /home/matt/icn-prototype/blockchain/core/shard/state_manager.py
-# Size: 6410 bytes
-# Last Modified: Fri Oct 25 13:47:08 2024
-# Language: py
-# ============================================================
-
-```py
-    # blockchain/core/shard/state_manager.py
-    
-    from typing import Dict, Any, Optional
-    import logging
-    from datetime import datetime
-    from copy import deepcopy
-    from .types import ShardMetrics, ShardConfig
-    from ..block import Block
-    
-    logger = logging.getLogger(__name__)
-    
-    class StateManager:
-        """Manages shard state, metrics, and state transitions."""
-        
-        def __init__(self, shard_id: int, config: ShardConfig):
-            self.shard_id = shard_id
-            self.config = config
-            self.state: Dict[str, Any] = {}
-            self.metrics = ShardMetrics()
-            self.state_history: List[Dict] = []
-            self.last_state_update = datetime.now()
-            self._backup_state: Optional[Dict] = None
-    
-        def update_state(self, block: Block) -> bool:
-            """
-            Update state based on a new block.
-            
-            Args:
-                block: New block to process
-                
-            Returns:
-                bool: True if state was updated successfully
-            """
-            try:
-                # Create state backup
-                self._backup_state = deepcopy(self.state)
-                
-                # Process each transaction
-                for tx in block.transactions:
-                    self._process_transaction_state(tx)
-                
-                # Update metrics
-                self._update_metrics_for_block(block)
-                
-                # Save state snapshot if needed
-                if self._should_save_snapshot():
-                    self._save_state_snapshot()
-                
-                self.last_state_update = datetime.now()
-                return True
-    
-            except Exception as e:
-                logger.error(f"Failed to update state: {str(e)}")
-                if self._backup_state is not None:
-                    self.state = self._backup_state
-                return False
-    
-        def _process_transaction_state(self, transaction) -> None:
-            """Process a transaction's impact on state."""
-            # Update account balances, contract states, etc.
-            if transaction.action == "transfer":
-                self._update_balances(transaction)
-            elif transaction.action == "contract":
-                self._update_contract_state(transaction)
-            
-            # Update general state metrics
-            self.metrics.total_transactions += 1
-    
-        def _update_metrics_for_block(self, block: Block) -> None:
-            """Update metrics based on a new block."""
-            try:
-                # Update block time metrics
-                if len(self.state_history) > 0:
-                    block_time = (block.timestamp - self.last_state_update).total_seconds()
-                    blocks_created = self.metrics.blocks_created
-                    self.metrics.average_block_time = (
-                        (self.metrics.average_block_time * blocks_created + block_time)
-                        / (blocks_created + 1)
-                    )
-                
-                # Update other metrics
-                self.metrics.blocks_created += 1
-                self.metrics.total_transactions += len(block.transactions)
-                
-                # Calculate average transactions per block
-                if self.metrics.blocks_created > 0:
-                    self.metrics.average_transactions_per_block = (
-                        self.metrics.total_transactions / self.metrics.blocks_created
-                    )
-                
-                # Update size metrics
-                self.metrics.total_size_bytes += len(str(block.to_dict()))
-                self.metrics.state_size_bytes = len(str(self.state))
-    
-            except Exception as e:
-                logger.error(f"Failed to update metrics: {str(e)}")
-    
-        def _should_save_snapshot(self) -> bool:
-            """Determine if state snapshot should be saved."""
-            # Save snapshot every 100 blocks or if state size changed significantly
-            return (
-                self.metrics.blocks_created % 100 == 0 or
-                self.metrics.state_size_bytes > self.config.max_state_size * 0.9
-            )
-    
-        def _save_state_snapshot(self) -> None:
-            """Save a snapshot of current state."""
-            try:
-                snapshot = {
-                    'timestamp': datetime.now(),
-                    'state': deepcopy(self.state),
-                    'metrics': self.metrics.to_dict(),
-                    'block_height': self.metrics.blocks_created
-                }
-                self.state_history.append(snapshot)
-                
-                # Keep only last 10 snapshots
-                if len(self.state_history) > 10:
-                    self.state_history = self.state_history[-10:]
-    
-            except Exception as e:
-                logger.error(f"Failed to save state snapshot: {str(e)}")
-    
-        def rollback_state(self) -> bool:
-            """
-            Rollback to last backup state.
-            
-            Returns:
-                bool: True if rollback was successful
-            """
-            try:
-                if self._backup_state is not None:
-                    self.state = self._backup_state
-                    self._backup_state = None
-                    return True
-                return False
-    
-            except Exception as e:
-                logger.error(f"Failed to rollback state: {str(e)}")
-                return False
-    
-        def get_metrics(self) -> Dict:
-            """Get current metrics."""
-            return self.metrics.to_dict()
-    
-        def get_state_size(self) -> int:
-            """Get current state size in bytes."""
-            return len(str(self.state))
-    
-        def clear_state(self) -> None:
-            """Clear current state."""
-            self._backup_state = deepcopy(self.state)
-            self.state = {}
-            self.metrics = ShardMetrics()
-    
-        def to_dict(self) -> Dict:
-            """Convert manager state to dictionary format."""
-            return {
-                'state': deepcopy(self.state),
-                'metrics': self.metrics.to_dict(),
-                'last_update': self.last_state_update.isoformat(),
-                'history': [
-                    {
-                        'timestamp': snapshot['timestamp'].isoformat(),
-                        'block_height': snapshot['block_height'],
-                        'state_size': len(str(snapshot['state']))
-                    }
-                    for snapshot in self.state_history
-                ]
-            }
-    
-        @classmethod
-        def from_dict(cls, data: Dict, shard_id: int, config: ShardConfig) -> 'StateManager':
-            """Create manager from dictionary data."""
-            manager = cls(shard_id, config)
-            manager.state = deepcopy(data['state'])
-            manager.metrics = ShardMetrics.from_dict(data['metrics'])
-            manager.last_state_update = datetime.fromisoformat(data['last_update'])
-            return manager
-```
-
-
-# ============================================================
-# File: /home/matt/icn-prototype/blockchain/core/shard/validation.py
-# Size: 6890 bytes
-# Last Modified: Fri Oct 25 13:45:37 2024
-# Language: py
-# ============================================================
-
-```py
-    # blockchain/core/shard/validation.py
-    
-    from typing import Dict, Optional, List
-    import logging
-    from datetime import datetime, timedelta
-    from .types import ShardMetrics, ShardConfig
-    from ..transaction import Transaction
-    from ..block import Block
-    
-    logger = logging.getLogger(__name__)
-    
-    class ValidationManager:
-        """Handles transaction and chain validation logic."""
-        
-        def __init__(self, shard_id: int, config: ShardConfig):
-            self.shard_id = shard_id
-            self.config = config
-            self.validation_cache: Dict[str, bool] = {}
-            self.metrics = ShardMetrics()
-            self.last_validation_time: Dict[str, datetime] = {}
-    
-        def validate_transaction(self, transaction: Transaction) -> bool:
-            """
-            Validate a transaction before adding to pool.
-            
-            Args:
-                transaction: Transaction to validate
-                
-            Returns:
-                bool: True if transaction is valid
-            """
-            try:
-                # Check cache first
-                tx_id = transaction.transaction_id
-                if tx_id in self.validation_cache:
-                    return self.validation_cache[tx_id]
-    
-                # Basic validation
-                if not transaction.validate():
-                    logger.error(f"Transaction {tx_id} failed basic validation")
-                    self.validation_cache[tx_id] = False
-                    return False
-    
-                # Validate shard assignment
-                if transaction.shard_id != self.shard_id:
-                    logger.error(f"Transaction {tx_id} has incorrect shard_id")
-                    self.validation_cache[tx_id] = False
-                    return False
-    
-                # Validate timestamp
-                if transaction.timestamp > datetime.now() + timedelta(minutes=5):
-                    logger.error(f"Transaction {tx_id} has future timestamp")
-                    self.validation_cache[tx_id] = False
-                    return False
-    
-                # Cache and return result
-                self.validation_cache[tx_id] = True
-                self.last_validation_time[tx_id] = datetime.now()
-                return True
-    
-            except Exception as e:
-                logger.error(f"Transaction validation failed: {str(e)}")
-                return False
-    
-        def validate_block(self, block: Block, previous_block: Optional[Block] = None) -> bool:
-            """
-            Validate a block before adding to chain.
-            
-            Args:
-                block: Block to validate
-                previous_block: Previous block in chain
-                
-            Returns:
-                bool: True if block is valid
-            """
-            try:
-                # Validate block structure
-                if not block.validate(previous_block):
-                    logger.error("Block failed structural validation")
-                    return False
-    
-                # Validate shard assignment
-                if block.shard_id != self.shard_id:
-                    logger.error(f"Block has incorrect shard_id: {block.shard_id}")
-                    return False
-    
-                # Validate transactions
-                if not self._validate_block_transactions(block):
-                    return False
-    
-                # Validate block size
-                block_size = len(str(block.to_dict()))
-                if block_size > self.config.max_block_size:
-                    logger.error(f"Block size {block_size} exceeds limit")
-                    return False
-    
-                return True
-    
-            except Exception as e:
-                logger.error(f"Block validation failed: {str(e)}")
-                return False
-    
-        def _validate_block_transactions(self, block: Block) -> bool:
-            """
-            Validate all transactions in a block.
-            
-            Args:
-                block: Block containing transactions
-                
-            Returns:
-                bool: True if all transactions are valid
-            """
-            try:
-                # Validate transaction count
-                if len(block.transactions) > self.config.max_transactions_per_block:
-                    logger.error("Block exceeds maximum transaction limit")
-                    return False
-    
-                # Validate individual transactions
-                for tx in block.transactions:
-                    if not self.validate_transaction(tx):
-                        logger.error(f"Invalid transaction in block: {tx.transaction_id}")
-                        return False
-    
-                # Validate transaction ordering (by priority)
-                for i in range(len(block.transactions) - 1):
-                    if block.transactions[i].priority < block.transactions[i + 1].priority:
-                        logger.error("Block transactions not properly ordered by priority")
-                        return False
-    
-                return True
-    
-            except Exception as e:
-                logger.error(f"Block transaction validation failed: {str(e)}")
-                return False
-    
-        def validate_chain_sequence(self, blocks: List[Block]) -> bool:
-            """
-            Validate a sequence of blocks.
-            
-            Args:
-                blocks: List of blocks to validate
-                
-            Returns:
-                bool: True if sequence is valid
-            """
-            try:
-                for i in range(1, len(blocks)):
-                    current_block = blocks[i]
-                    previous_block = blocks[i - 1]
-    
-                    # Validate block
-                    if not self.validate_block(current_block, previous_block):
-                        logger.error(f"Invalid block at height {i}")
-                        return False
-    
-                    # Validate sequence
-                    if current_block.index != previous_block.index + 1:
-                        logger.error(f"Non-sequential blocks at height {i}")
-                        return False
-    
-                    # Validate timestamps
-                    if current_block.timestamp <= previous_block.timestamp:
-                        logger.error(f"Invalid timestamp at height {i}")
-                        return False
-    
-                return True
-    
-            except Exception as e:
-                logger.error(f"Chain sequence validation failed: {str(e)}")
-                return False
-    
-        def clear_old_validations(self, max_age_minutes: int = 60) -> None:
-            """
-            Clear old validation cache entries.
-            
-            Args:
-                max_age_minutes: Maximum age of cache entries
-            """
-            try:
-                current_time = datetime.now()
-                cutoff_time = current_time - timedelta(minutes=max_age_minutes)
-    
-                # Clear old entries
-                self.validation_cache = {
-                    tx_id: result
-                    for tx_id, result in self.validation_cache.items()
-                    if self.last_validation_time.get(tx_id, current_time) > cutoff_time
-                }
-    
-                # Clear old timestamps
-                self.last_validation_time = {
-                    tx_id: timestamp
-                    for tx_id, timestamp in self.last_validation_time.items()
-                    if timestamp > cutoff_time
-                }
-    
-            except Exception as e:
-                logger.error(f"Failed to clear old validations: {str(e)}")
-```
-
-
-# ============================================================
-# File: /home/matt/icn-prototype/blockchain/core/shard/base.py
-# Size: 6556 bytes
-# Last Modified: Fri Oct 25 13:48:33 2024
-# Language: py
-# ============================================================
-
-```py
-    # blockchain/core/shard/base.py
-    
-    from typing import Dict, List, Optional, Set
-    import logging
-    from datetime import datetime
-    from .types import ShardConfig, ShardMetrics
-    from .transaction_manager import TransactionManager
-    from .state_manager import StateManager
-    from .validation import ValidationManager
-    from .cross_shard import CrossShardManager
-    from ..block import Block
-    from ..transaction import Transaction
-    
-    logger = logging.getLogger(__name__)
-    
-    class Shard:
-        """
-        Main shard class that coordinates all shard components.
-        
-        This class serves as the primary interface for shard operations,
-        delegating specific functionalities to specialized managers.
-        """
-        
-        def __init__(self, shard_id: int, config: Optional[ShardConfig] = None):
-            """
-            Initialize a new shard.
-            
-            Args:
-                shard_id: Unique identifier for this shard
-                config: Optional configuration, uses defaults if not provided
-            """
-            self.shard_id = shard_id
-            self.config = config or ShardConfig()
-            
-            # Initialize managers
-            self.transaction_manager = TransactionManager(shard_id, self.config)
-            self.state_manager = StateManager(shard_id, self.config)
-            self.validation_manager = ValidationManager(shard_id, self.config)
-            self.cross_shard_manager = CrossShardManager(shard_id, self.config)
-            
-            # Core properties
-            self.chain: List[Block] = []
-            self.height = 0
-            self.known_validators: Set[str] = set()
-            
-            self._create_genesis_block()
-    
-        def _create_genesis_block(self) -> None:
-            """Create and add the genesis block."""
-            genesis_block = Block(
-                index=0,
-                previous_hash="0" * 64,
-                timestamp=datetime.now(),
-                transactions=[],
-                validator="genesis",
-                shard_id=self.shard_id
-            )
-            
-            self.chain.append(genesis_block)
-            self.height = 1
-            self.known_validators.add("genesis")
-            self.state_manager.update_state(genesis_block)
-    
-        def add_transaction(self, transaction: Transaction) -> bool:
-            """
-            Add a new transaction to the shard.
-            
-            Args:
-                transaction: Transaction to add
-                
-            Returns:
-                bool: True if transaction was added successfully
-            """
-            # Validate transaction
-            if not self.validation_manager.validate_transaction(transaction):
-                return False
-                
-            # Check for cross-shard implications
-            cross_shard_ref = self.cross_shard_manager.process_transaction(transaction)
-            
-            # Add to transaction pool
-            return self.transaction_manager.add_transaction(transaction)
-    
-        def create_block(self, validator: str) -> Optional[Block]:
-            """
-            Create a new block from pending transactions.
-            
-            Args:
-                validator: ID of the validator creating the block
-                
-            Returns:
-                Optional[Block]: New block if created successfully
-            """
-            # Select transactions
-            transactions = self.transaction_manager.select_transactions_for_block()
-            if not transactions:
-                return None
-    
-            # Create block
-            block = Block(
-                index=self.height,
-                previous_hash=self.chain[-1].hash,
-                timestamp=datetime.now(),
-                transactions=transactions,
-                validator=validator,
-                shard_id=self.shard_id
-            )
-    
-            # Add cross-shard references
-            self.cross_shard_manager.update_references(block)
-            
-            return block
-    
-        def add_block(self, block: Block) -> bool:
-            """
-            Add a validated block to the chain.
-            
-            Args:
-                block: Block to add
-                
-            Returns:
-                bool: True if block was added successfully
-            """
-            # Validate block
-            if not self.validation_manager.validate_block(block, self.chain[-1]):
-                return False
-    
-            # Update state
-            if not self.state_manager.update_state(block):
-                return False
-    
-            # Add block to chain
-            self.chain.append(block)
-            self.height += 1
-            self.known_validators.add(block.validator)
-    
-            # Remove included transactions
-            tx_ids = {tx.transaction_id for tx in block.transactions}
-            self.transaction_manager.remove_transactions(tx_ids)
-    
-            return True
-    
-        def validate_chain(self) -> bool:
-            """
-            Validate the entire chain.
-            
-            Returns:
-                bool: True if chain is valid
-            """
-            return self.validation_manager.validate_chain_sequence(self.chain)
-    
-        def get_metrics(self) -> Dict:
-            """Get comprehensive shard metrics."""
-            return {
-                "shard_id": self.shard_id,
-                "height": self.height,
-                "chain_size": len(self.chain),
-                "known_validators": len(self.known_validators),
-                **self.state_manager.get_metrics(),
-                **self.cross_shard_manager.get_metrics()
-            }
-    
-        def to_dict(self) -> Dict:
-            """Convert shard state to dictionary format."""
-            return {
-                "shard_id": self.shard_id,
-                "height": self.height,
-                "chain": [block.to_dict() for block in self.chain],
-                "config": self.config.to_dict(),
-                "known_validators": list(self.known_validators),
-                "transaction_manager": self.transaction_manager.to_dict(),
-                "state_manager": self.state_manager.to_dict(),
-                "cross_shard_manager": self.cross_shard_manager.to_dict()
-            }
-    
-        @classmethod
-        def from_dict(cls, data: Dict) -> 'Shard':
-            """Create shard from dictionary data."""
-            # Create shard instance
-            config = ShardConfig.from_dict(data["config"])
-            shard = cls(data["shard_id"], config)
-            
-            # Restore chain
-            shard.chain = [Block.from_dict(block) for block in data["chain"]]
-            shard.height = data["height"]
-            shard.known_validators = set(data["known_validators"])
-            
-            # Restore managers
-            shard.transaction_manager = TransactionManager.from_dict(
-                data["transaction_manager"], shard.shard_id, config
-            )
-            shard.state_manager = StateManager.from_dict(
-                data["state_manager"], shard.shard_id, config
-            )
-            shard.cross_shard_manager = CrossShardManager.from_dict(
-                data["cross_shard_manager"], shard.shard_id, config
-            )
-            
-            return shard
-```
-
-
-# ============================================================
 # File: /home/matt/icn-prototype/blockchain/core/shard/__init__.py
-# Size: 480 bytes
-# Last Modified: Fri Oct 25 13:48:39 2024
+# Size: 503 bytes
+# Last Modified: Fri Oct 25 23:14:47 2024
 # Language: py
 # ============================================================
 
@@ -9734,16 +10691,16 @@ icn-prototype/
     # blockchain/core/shard/__init__.py
     
     from .base import Shard
-    from .types import ShardConfig, ShardMetrics, CrossShardRef
+    from .shard_types import ShardConfig, ShardMetrics, CrossShardRef
     from .transaction_manager import TransactionManager
     from .state_manager import StateManager
-    from .validation import ValidationManager
-    from .cross_shard import CrossShardManager
+    from .validation_manager import ValidationManager
+    from .cross_shard_manager import CrossShardManager
     
     __all__ = [
         "Shard",
         "ShardConfig",
-        "ShardMetrics",
+        "ShardMetrics", 
         "CrossShardRef",
         "TransactionManager",
         "StateManager",

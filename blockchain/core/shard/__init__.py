@@ -4,13 +4,13 @@ from .base import Shard
 from .shard_types import ShardConfig, ShardMetrics, CrossShardRef
 from .transaction_manager import TransactionManager
 from .state_manager import StateManager
-from .validation import ValidationManager
-from .cross_shard import CrossShardManager
+from .validation_manager import ValidationManager
+from .cross_shard_manager import CrossShardManager
 
 __all__ = [
     "Shard",
     "ShardConfig",
-    "ShardMetrics",
+    "ShardMetrics", 
     "CrossShardRef",
     "TransactionManager",
     "StateManager",

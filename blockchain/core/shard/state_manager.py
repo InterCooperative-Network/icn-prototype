@@ -26,17 +26,31 @@ class StateManager:
         self.state_history: List[Dict] = []
         self.last_state_update = datetime.now()
         self._backup_state: Optional[Dict] = None
+        
+        # Track processed transactions to prevent duplicates
+        self.processed_transactions: Set[str] = set()
 
     def update_state(self, block: Block) -> bool:
-        """Update state based on a new block."""
+        """
+        Update state based on a new block.
+        
+        Args:
+            block: Block containing transactions to process
+            
+        Returns:
+            bool: True if state was updated successfully
+        """
         try:
             # Create state backup
             self._backup_state = deepcopy(self.state)
             
             # Process each transaction
             for tx in block.transactions:
-                self._process_transaction_state(tx)
-            
+                if not self._process_transaction_state(tx):
+                    logger.error(f"Failed to process transaction {tx.transaction_id}")
+                    self.rollback_state()
+                    return False
+
             # Update metrics
             self._update_metrics_for_block(block)
             
@@ -46,85 +60,109 @@ class StateManager:
             
             self.last_state_update = datetime.now()
             self.state["last_processed_block"] = block.index
+            
+            # Track processed transactions
+            for tx in block.transactions:
+                self.processed_transactions.add(tx.transaction_id)
+            
             return True
 
         except Exception as e:
             logger.error(f"Failed to update state: {str(e)}")
-            if self._backup_state is not None:
-                self.state = self._backup_state
+            self.rollback_state()
             return False
 
-    def _process_transaction_state(self, transaction: Transaction) -> None:
+    def _process_transaction_state(self, transaction: Transaction) -> bool:
         """Process a transaction's impact on state."""
         try:
-            if transaction.action == "transfer":
-                self._update_balances(transaction)
-            elif transaction.action == "contract":
-                self._update_contract_state(transaction)
+            # Skip if already processed
+            if transaction.transaction_id in self.processed_transactions:
+                logger.warning(f"Transaction {transaction.transaction_id} already processed")
+                return True
+
+            # Ensure all accounts exist in state
+            balances = self.state["balances"]
+            if transaction.sender not in balances:
+                balances[transaction.sender] = 1000.0  # Initial balance
+            if transaction.receiver not in balances:
+                balances[transaction.receiver] = 1000.0  # Initial balance
+
+            # Verify sufficient balance
+            amount = float(transaction.data.get("amount", 0))
+            if amount <= 0:
+                logger.error(f"Invalid transaction amount: {amount}")
+                return False
+
+            if balances[transaction.sender] < amount:
+                logger.error(f"Insufficient balance for {transaction.sender}")
+                return False
+
+            # Update balances
+            balances[transaction.sender] -= amount
+            balances[transaction.receiver] += amount
+
+            if transaction.action == "contract":
+                return self._update_contract_state(transaction)
             elif transaction.action == "store":
-                self._update_storage_state(transaction)
-            
+                return self._update_storage_state(transaction)
+
             # Update metadata
             self._update_metadata(transaction)
             
             self.metrics.total_transactions += 1
+            return True
 
         except Exception as e:
             logger.error(f"Failed to process transaction state: {str(e)}")
-            raise
+            return False
 
-    def _update_balances(self, transaction: Transaction) -> None:
-        """Update account balances based on transaction."""
-        balances = self.state["balances"]
-        
-        # Initialize accounts if they don't exist
-        if transaction.sender not in balances:
-            balances[transaction.sender] = 0.0
-        if transaction.receiver not in balances:
-            balances[transaction.receiver] = 0.0
-        
-        amount = float(transaction.data.get("amount", 0))
-        if amount <= 0:
-            return
-            
-        # Update balances
-        balances[transaction.sender] -= amount
-        balances[transaction.receiver] += amount
-
-    def _update_contract_state(self, transaction: Transaction) -> None:
+    def _update_contract_state(self, transaction: Transaction) -> bool:
         """Update smart contract state."""
-        contracts = self.state["contracts"]
-        contract_id = transaction.data.get("contract_id")
-        
-        if not contract_id:
-            return
+        try:
+            contracts = self.state["contracts"]
+            contract_id = transaction.data.get("contract_id")
             
-        if contract_id not in contracts:
-            contracts[contract_id] = {"state": {}, "calls": []}
-            
-        # Update contract state
-        contracts[contract_id]["state"].update(transaction.data.get("state_updates", {}))
-        contracts[contract_id]["calls"].append({
-            "timestamp": transaction.timestamp.isoformat(),
-            "sender": transaction.sender,
-            "action": transaction.data.get("contract_action")
-        })
+            if not contract_id:
+                return False
+                
+            if contract_id not in contracts:
+                contracts[contract_id] = {"state": {}, "calls": []}
+                
+            # Update contract state
+            contracts[contract_id]["state"].update(transaction.data.get("state_updates", {}))
+            contracts[contract_id]["calls"].append({
+                "timestamp": transaction.timestamp.isoformat(),
+                "sender": transaction.sender,
+                "action": transaction.data.get("contract_action")
+            })
+            return True
 
-    def _update_storage_state(self, transaction: Transaction) -> None:
+        except Exception as e:
+            logger.error(f"Failed to update contract state: {str(e)}")
+            return False
+
+    def _update_storage_state(self, transaction: Transaction) -> bool:
         """Update storage state for data transactions."""
-        if "storage" not in self.state:
-            self.state["storage"] = {"files": {}, "size": 0}
+        try:
+            if "storage" not in self.state:
+                self.state["storage"] = {"files": {}, "size": 0}
+                
+            storage = self.state["storage"]
+            file_id = transaction.data.get("file_id")
             
-        storage = self.state["storage"]
-        file_id = transaction.data.get("file_id")
-        
-        if file_id and "file_data" in transaction.data:
-            storage["files"][file_id] = {
-                "owner": transaction.sender,
-                "size": len(transaction.data["file_data"]),
-                "timestamp": transaction.timestamp.isoformat()
-            }
-            storage["size"] += len(transaction.data["file_data"])
+            if file_id and "file_data" in transaction.data:
+                storage["files"][file_id] = {
+                    "owner": transaction.sender,
+                    "size": len(transaction.data["file_data"]),
+                    "timestamp": transaction.timestamp.isoformat()
+                }
+                storage["size"] += len(transaction.data["file_data"])
+                return True
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to update storage state: {str(e)}")
+            return False
 
     def _update_metadata(self, transaction: Transaction) -> None:
         """Update state metadata."""
@@ -148,11 +186,9 @@ class StateManager:
     def _update_metrics_for_block(self, block: Block) -> None:
         """Update metrics based on a new block."""
         try:
-            # Update block metrics
             self.metrics.blocks_created += 1
             self.metrics.total_transactions += len(block.transactions)
             
-            # Calculate average transactions per block
             if self.metrics.blocks_created > 0:
                 self.metrics.average_transactions_per_block = (
                     self.metrics.total_transactions / self.metrics.blocks_created
@@ -168,7 +204,6 @@ class StateManager:
 
     def _should_save_snapshot(self) -> bool:
         """Determine if state snapshot should be saved."""
-        # Save snapshot every 100 blocks or if state size changed significantly
         return (
             self.metrics.blocks_created % 100 == 0 or
             self.metrics.state_size_bytes > self.config.max_state_size * 0.9
@@ -196,7 +231,7 @@ class StateManager:
         """Rollback to last backup state."""
         try:
             if self._backup_state is not None:
-                self.state = self._backup_state
+                self.state = deepcopy(self._backup_state)
                 self._backup_state = None
                 return True
             return False
@@ -212,30 +247,17 @@ class StateManager:
             "blocks_created": self.metrics.blocks_created,
             "average_transactions_per_block": self.metrics.average_transactions_per_block,
             "total_size_bytes": self.metrics.total_size_bytes,
-            "state_size_bytes": self.metrics.state_size_bytes
+            "state_size_bytes": self.metrics.state_size_bytes,
+            "processed_transactions": len(self.processed_transactions)
         }
-
-    def get_state_size(self) -> int:
-        """Get current state size in bytes."""
-        return len(str(self.state))
-
-    def clear_state(self) -> None:
-        """Clear current state."""
-        self._backup_state = deepcopy(self.state)
-        self.state = {
-            "balances": {},
-            "contracts": {},
-            "metadata": {},
-            "last_processed_block": None
-        }
-        self.metrics = ShardMetrics()
 
     def to_dict(self) -> Dict:
         """Convert manager state to dictionary format."""
         return {
             'state': deepcopy(self.state),
             'metrics': self.metrics.to_dict(),
-            'last_update': self.last_state_update.isoformat()
+            'last_update': self.last_state_update.isoformat(),
+            'processed_transactions': list(self.processed_transactions)
         }
 
     @classmethod
@@ -245,4 +267,5 @@ class StateManager:
         manager.state = deepcopy(data['state'])
         manager.metrics = ShardMetrics.from_dict(data['metrics'])
         manager.last_state_update = datetime.fromisoformat(data['last_update'])
+        manager.processed_transactions = set(data.get('processed_transactions', []))
         return manager

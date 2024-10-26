@@ -1,3 +1,33 @@
+# Basic Site Information
+site_name: 'InterCooperative Network Documentation'
+site_description: 'Technical Documentation for the InterCooperative Network (ICN)'
+site_author: 'Matt'
+site_url: 'http://192.168.20.50:8000'
+repo_url: 'https://github.com/InterCooperative-Network/icn-prototype'
+repo_name: 'ICN GitHub'
+edit_uri: 'edit/main/docs/'
+
+# Theme Configuration
+theme:
+  name: 'material'
+  palette:
+    scheme: 'slate'  # Sets a dark base color scheme
+    primary: 'blue-grey'  # A muted dark tone for primary elements
+    accent: 'teal'  # A cool teal accent color
+  font:
+    text: 'Roboto'
+    code: 'Roboto Mono'
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - search.highlight
+    - toc.integrate
+    - content.action.icon
+    - tabs.sticky
+  logo: 'images/icn_logo.png'  # Replace with your logo path
+  favicon: 'images/icn_favicon.ico'  # Replace with your favicon path
+
+# Navigation Structure
 nav:
   - Home: index.md
   - Architecture: architecture.md
@@ -38,3 +68,40 @@ nav:
       - Unit:
           - Blockchain: tests/unit/test_blockchain.md
           - Node: tests/unit/test_node.md
+
+# Plugins Configuration
+plugins:
+  - search
+  - awesome-pages
+  - macros
+  - git-revision-date-localized
+  - minify
+  - redirects
+
+# Markdown Extensions
+markdown_extensions:
+  - toc:
+      permalink: True
+  - footnotes
+  - def_list
+  - codehilite:
+      guess_lang: false
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+# Extra CSS and JavaScript
+extra_css:
+  - 'overrides/main.css'  # Custom CSS for further styling
+
+extra_javascript:
+  - 'javascripts/custom.js'  # Add custom JS if needed
+
+# Additional Options
+strict: false  # Set to false to allow the build to proceed with warnings
+use_directory_urls: true

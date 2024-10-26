@@ -2,7 +2,7 @@ import os
 import time
 
 # Define directories and files to exclude
-EXCLUDE_DIRS = ["__pycache__", ".git", "node_modules", "build", "dist", "venv", ".idea", "icn_env"]
+EXCLUDE_DIRS = ["__pycache__", ".git", "node_modules", "build", "dist", "venv", ".idea", "icn_env", "docs", "icn-docs"]
 EXCLUDE_FILES = [".pyc", ".pyo", ".log", ".tmp", ".cache", ".DS_Store"]
 
 def tree_structure(startpath, max_depth=3):
@@ -35,7 +35,8 @@ def tree_structure(startpath, max_depth=3):
 
 def concatenate_code_files(source_dir, output_file, extensions=None, max_depth=3):
     """
-    Concatenate code files from a directory, excluding cache files and irrelevant directories.
+    Concatenate code files from a directory, excluding cache files, documentation files,
+    and irrelevant directories like 'icn-docs'.
     """
     if extensions is None:
         extensions = [".py", ".rs", ".js", ".ts", ".c"]
@@ -57,6 +58,10 @@ def concatenate_code_files(source_dir, output_file, extensions=None, max_depth=3
     for root, dirs, files in os.walk(source_dir):
         # Exclude irrelevant directories
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+
+        # Skip any directory containing 'icn-docs' or 'docs' in its path
+        if "icn-docs" in root.split(os.path.sep) or "docs" in root.split(os.path.sep):
+            continue
 
         for file in files:
             # Skip excluded file types

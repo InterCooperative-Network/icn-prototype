@@ -10,6 +10,7 @@
 # /home/matt/icn-prototype/api/server.py - 5851 bytes - Included
 # /home/matt/icn-prototype/api/__init__.py - 0 bytes - Included
 # /home/matt/icn-prototype/tests/__init__.py - 60 bytes - Included
+# /home/matt/icn-prototype/tests/integration/test_cooldown_management.py - 1102 bytes - Included
 # /home/matt/icn-prototype/tests/integration/test_consensus_mechanism.py - 10902 bytes - Included
 # /home/matt/icn-prototype/tests/integration/test_block_creation.py - 11204 bytes - Included
 # /home/matt/icn-prototype/tests/integration/test_shard_management.py - 10810 bytes - Included
@@ -23,6 +24,7 @@
 # /home/matt/icn-prototype/tests/unit/test_proof_of_cooperation.py - 10692 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_contract_executor.py - 9655 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_block.py - 10172 bytes - Included
+# /home/matt/icn-prototype/tests/unit/test_validator_manager.py - 1238 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_shard.py - 10959 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_node.py - 7500 bytes - Included
 # /home/matt/icn-prototype/tests/unit/test_transaction.py - 7391 bytes - Included
@@ -59,11 +61,11 @@
 # /home/matt/icn-prototype/blockchain/consensus/__init__.py - 159 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py - 9628 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py - 14712 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py - 0 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py - 5237 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/types.py - 7904 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py - 0 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py - 0 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py - 0 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py - 5583 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py - 5580 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py - 6184 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/__init__.py - 0 bytes - Included
 
 
@@ -98,6 +100,7 @@ icn-prototype/
     tests/
         __init__.py
         integration/
+            test_cooldown_management.py
             test_consensus_mechanism.py
             test_block_creation.py
             test_shard_management.py
@@ -113,6 +116,7 @@ icn-prototype/
             test_proof_of_cooperation.py
             test_contract_executor.py
             test_block.py
+            test_validator_manager.py
             test_shard.py
             test_node.py
             test_transaction.py
@@ -1104,6 +1108,44 @@ icn-prototype/
 ```py
     # tests/__init__.py
     """Test suite for the ICN blockchain."""
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/tests/integration/test_cooldown_management.py
+# Size: 1102 bytes
+# Last Modified: Sat Oct 26 18:42:20 2024
+# Language: py
+# ============================================================
+
+```py
+    import unittest
+    from datetime import datetime, timedelta
+    from blockchain.consensus.proof_of_cooperation.cooldown_manager import CooldownManager
+    from blockchain.core.node import Node
+    
+    class TestCooldownManagement(unittest.TestCase):
+        def setUp(self):
+            self.cooldown_manager = CooldownManager(base_cooldown=3, max_cooldown=10)
+            self.node1 = Node(node_id="node1", cooperative_id="coop1", initial_stake=100.0)
+            self.node1.reputation = 20.0
+    
+        def test_dynamic_cooldown_increase(self):
+            # Simulate high participation rate to trigger dynamic cooldown increase
+            for _ in range(5):
+                self.cooldown_manager._track_activity(self.node1)
+            
+            self.cooldown_manager.apply_cooldown(self.node1)
+            self.assertGreater(self.node1.cooldown, 3)  # Cooldown should increase
+    
+        def test_cooldown_decay(self):
+            # Test that cooldown decreases gradually over time
+            self.node1.cooldown = 5
+            self.cooldown_manager.reset_cooldown(self.node1)
+            self.assertEqual(self.node1.cooldown, 4)
+    
+    if __name__ == '__main__':
+        unittest.main()
 ```
 
 
@@ -4537,6 +4579,47 @@ icn-prototype/
                 self.assertEqual(orig_tx.sender, new_tx.sender)
                 self.assertEqual(orig_tx.receiver, new_tx.receiver)
                 self.assertEqual(orig_tx.data, new_tx.data)
+    
+    if __name__ == '__main__':
+        unittest.main()
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/tests/unit/test_validator_manager.py
+# Size: 1238 bytes
+# Last Modified: Sat Oct 26 18:41:44 2024
+# Language: py
+# ============================================================
+
+```py
+    import unittest
+    from datetime import datetime, timedelta
+    from blockchain.consensus.proof_of_cooperation.validator_manager import ValidatorManager
+    from blockchain.core.node import Node
+    
+    class TestValidatorManager(unittest.TestCase):
+        def setUp(self):
+            self.manager = ValidatorManager(min_reputation=10.0, cooldown_blocks=3)
+            self.node1 = Node(node_id="node1", cooperative_id="coop1", initial_stake=100.0)
+            self.node1.reputation = 25.0
+    
+        def test_validator_selection(self):
+            # Test that node1 can be selected as a validator
+            validator = self.manager.select_validator([self.node1])
+            self.assertEqual(validator, self.node1)
+            self.assertEqual(validator.cooldown, 3)
+    
+        def test_validator_ineligibility_due_to_cooldown(self):
+            # Put node1 into cooldown and test that it cannot be selected
+            self.node1.cooldown = 1
+            validator = self.manager.select_validator([self.node1])
+            self.assertIsNone(validator)
+    
+        def test_priority_calculation(self):
+            # Test the priority calculation for validator selection
+            score = self.manager._calculate_priority_score(self.node1)
+            self.assertGreater(score, 0)
     
     if __name__ == '__main__':
         unittest.main()
@@ -13195,13 +13278,148 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py
-# Size: 0 bytes
-# Last Modified: Sat Oct 26 14:10:55 2024
+# Size: 5237 bytes
+# Last Modified: Sat Oct 26 18:33:40 2024
 # Language: py
 # ============================================================
 
 ```py
-
+    """
+    validator_manager.py
+    
+    This module manages validators within the Proof of Cooperation (PoC) consensus mechanism.
+    It handles validator selection, state management, and integration with the reputation system.
+    
+    Classes:
+        ValidatorManager
+    """
+    
+    from typing import List, Optional
+    from datetime import datetime, timedelta
+    from .types import Node, Shard
+    
+    class ValidatorManager:
+        """
+        The ValidatorManager is responsible for managing validators within the PoC mechanism.
+        
+        Key Responsibilities:
+        - Selecting eligible validators for block validation.
+        - Tracking validator states, including reputation, performance, and cooldown periods.
+        - Integrating with the shard management system to ensure validator availability per shard.
+        - Enforcing reputation requirements and cooldown periods for fair participation.
+        """
+        
+        def __init__(self, min_reputation: float, cooldown_blocks: int):
+            """
+            Initialize the ValidatorManager with minimum reputation and cooldown settings.
+            
+            Args:
+                min_reputation (float): Minimum reputation required for validators.
+                cooldown_blocks (int): Number of blocks a validator must wait after validation.
+            """
+            self.min_reputation = min_reputation
+            self.cooldown_blocks = cooldown_blocks
+            self.validator_history = []  # Stores tuples of (validator_id, timestamp, shard_id)
+    
+        def select_validator(self, nodes: List[Node], shard_id: Optional[int] = None) -> Optional[Node]:
+            """
+            Select an eligible validator from the provided list of nodes.
+    
+            Selection Criteria:
+            - Node must have reputation above the minimum threshold.
+            - Node must not be in cooldown.
+            - Node must be able to validate the specified shard, if shard_id is provided.
+            - Nodes with higher reputation and more cooperative interactions are prioritized.
+    
+            Args:
+                nodes (List[Node]): List of nodes to select from.
+                shard_id (Optional[int]): Shard ID for which a validator is needed.
+            
+            Returns:
+                Optional[Node]: The selected validator node, or None if no eligible validator found.
+            """
+            eligible_nodes = [node for node in nodes if self._is_eligible(node, shard_id)]
+            if not eligible_nodes:
+                return None
+    
+            # Sort by reputation, cooperative interactions, and performance metrics
+            eligible_nodes.sort(key=self._calculate_priority_score, reverse=True)
+    
+            # Select the top candidate
+            selected_validator = eligible_nodes[0]
+            selected_validator.enter_cooldown(self.cooldown_blocks)
+            self._track_validator_history(selected_validator, shard_id)
+            return selected_validator
+    
+        def _is_eligible(self, node: Node, shard_id: Optional[int]) -> bool:
+            """
+            Check if a node is eligible to be a validator based on reputation, cooldown, and shard assignment.
+            
+            Args:
+                node (Node): Node to check eligibility for.
+                shard_id (Optional[int]): Shard ID to validate eligibility against.
+    
+            Returns:
+                bool: True if node is eligible, False otherwise.
+            """
+            if node.reputation < self.min_reputation:
+                return False
+            if node.cooldown > 0:
+                return False
+            if shard_id is not None and not node.can_validate(shard_id):
+                return False
+            return True
+    
+        def _calculate_priority_score(self, node: Node) -> float:
+            """
+            Calculate a priority score for selecting validators based on multiple factors.
+    
+            The score is calculated using:
+            - Reputation
+            - Number of cooperative interactions
+            - Performance metrics (e.g., availability, validation success rate)
+    
+            Args:
+                node (Node): Node to calculate the priority score for.
+    
+            Returns:
+                float: Calculated priority score.
+            """
+            reputation_weight = 0.6
+            interaction_weight = 0.2
+            performance_weight = 0.2
+    
+            score = (
+                node.reputation * reputation_weight +
+                len(node.cooperative_interactions) * interaction_weight +
+                node.performance_metrics.get('validation_success_rate', 0) * performance_weight
+            )
+            return score
+    
+        def _track_validator_history(self, node: Node, shard_id: Optional[int]) -> None:
+            """
+            Track the history of validators for auditing and performance analysis.
+    
+            Args:
+                node (Node): The validator node.
+                shard_id (Optional[int]): The shard ID for which the node was selected as a validator.
+            """
+            self.validator_history.append((node.node_id, datetime.now(), shard_id))
+            
+            # Maintain a capped history size for memory efficiency
+            max_history_length = 1000
+            if len(self.validator_history) > max_history_length:
+                self.validator_history.pop(0)
+    
+        def reset_validator(self, node: Node) -> None:
+            """
+            Reset the cooldown and state of a validator node after it completes its cooldown period.
+    
+            Args:
+                node (Node): The validator node to reset.
+            """
+            node.cooldown = 0
+            node.reset_performance_metrics()
 ```
 
 
@@ -13413,37 +13631,487 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py
-# Size: 0 bytes
-# Last Modified: Sat Oct 26 14:10:55 2024
+# Size: 5583 bytes
+# Last Modified: Sat Oct 26 18:34:14 2024
 # Language: py
 # ============================================================
 
 ```py
-
+    """
+    collusion_detector.py
+    
+    This module detects collusion among validators and participants in the Proof of Cooperation (PoC) consensus mechanism.
+    It identifies patterns that may indicate fraudulent behavior or attempts to manipulate the consensus process.
+    
+    Classes:
+        CollusionDetector
+    """
+    
+    from typing import List, Dict, Tuple
+    from .types import Node, Transaction, Block
+    
+    class CollusionDetector:
+        """
+        The CollusionDetector is responsible for analyzing transaction patterns and validator behavior
+        to detect potential collusion within the PoC network.
+        
+        Key Responsibilities:
+        - Analyzing transaction patterns to identify repeated suspicious behavior.
+        - Monitoring validator interactions and decisions for signs of collusion.
+        - Utilizing historical data to identify anomalous patterns that could indicate fraud.
+        """
+    
+        def __init__(self, transaction_threshold: int = 10, validator_threshold: int = 3):
+            """
+            Initialize the CollusionDetector with detection thresholds.
+    
+            Args:
+                transaction_threshold (int): Number of similar transactions required to trigger a collusion check.
+                validator_threshold (int): Number of validators interacting repeatedly to trigger a collusion check.
+            """
+            self.transaction_threshold = transaction_threshold
+            self.validator_threshold = validator_threshold
+            self.suspicious_transactions = []  # Stores potentially collusive transactions
+    
+        def detect_collusion(self, validator: Node, block: Block) -> bool:
+            """
+            Detect potential collusion in a given block based on transaction patterns and validator behavior.
+    
+            Detection Criteria:
+            - Repeated transactions between the same sender and receiver within the same block.
+            - Validators repeatedly validating blocks with similar transactions from the same set of senders.
+            - Validators interacting unusually frequently with each other.
+    
+            Args:
+                validator (Node): The validator node to check for collusion.
+                block (Block): The block to analyze for collusion.
+    
+            Returns:
+                bool: True if collusion is detected, False otherwise.
+            """
+            # Analyze transaction patterns
+            if self._check_transaction_patterns(block.transactions):
+                self._mark_validator_as_suspicious(validator)
+                return True
+    
+            # Analyze validator interactions
+            if self._check_validator_interactions(validator):
+                self._mark_validator_as_suspicious(validator)
+                return True
+    
+            return False
+    
+        def _check_transaction_patterns(self, transactions: List[Transaction]) -> bool:
+            """
+            Check transaction patterns within a block to identify suspicious behavior.
+    
+            Criteria:
+            - If the same sender-receiver pair appears repeatedly within a block, it is considered suspicious.
+            - If a block contains an unusually high number of similar transactions, it may indicate collusion.
+    
+            Args:
+                transactions (List[Transaction]): List of transactions in the block.
+    
+            Returns:
+                bool: True if suspicious patterns are found, False otherwise.
+            """
+            transaction_count = {}  # Maps (sender, receiver) pairs to transaction counts
+            
+            for tx in transactions:
+                pair = (tx.sender, tx.receiver)
+                transaction_count[pair] = transaction_count.get(pair, 0) + 1
+                
+                if transaction_count[pair] >= self.transaction_threshold:
+                    self.suspicious_transactions.append(tx)
+                    return True  # Collusion detected in transaction patterns
+    
+            return False
+    
+        def _check_validator_interactions(self, validator: Node) -> bool:
+            """
+            Check if a validator is interacting unusually frequently with other validators.
+    
+            Criteria:
+            - If a validator consistently validates blocks from the same set of validators, it may indicate collusion.
+    
+            Args:
+                validator (Node): The validator to analyze for repeated interactions.
+    
+            Returns:
+                bool: True if suspicious interactions are found, False otherwise.
+            """
+            interaction_count = {}  # Maps validator IDs to interaction counts
+            
+            for interaction in validator.validation_history:
+                interacting_validator = interaction.get("validator_id")
+                if interacting_validator:
+                    interaction_count[interacting_validator] = interaction_count.get(interacting_validator, 0) + 1
+    
+                    if interaction_count[interacting_validator] >= self.validator_threshold:
+                        return True  # Collusion detected in validator interactions
+    
+            return False
+    
+        def _mark_validator_as_suspicious(self, validator: Node) -> None:
+            """
+            Mark a validator as suspicious and log the event for auditing purposes.
+    
+            Args:
+                validator (Node): The validator to mark as suspicious.
+            """
+            validator.metadata["status"] = "suspicious"
+            validator.metadata["last_suspicious_activity"] = datetime.now()
+            validator.reputation -= 5  # Apply a reputation penalty
+            validator.cooldown += 1  # Increase cooldown period for extra precaution
+    
+        def report_suspicious_transactions(self) -> List[Transaction]:
+            """
+            Generate a report of all suspicious transactions detected during collusion checks.
+    
+            Returns:
+                List[Transaction]: List of suspicious transactions.
+            """
+            return self.suspicious_transactions
 ```
 
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py
-# Size: 0 bytes
-# Last Modified: Sat Oct 26 14:10:55 2024
+# Size: 5580 bytes
+# Last Modified: Sat Oct 26 18:34:49 2024
 # Language: py
 # ============================================================
 
 ```py
-
+    """
+    base.py
+    
+    This module provides base classes and interfaces for the Proof of Cooperation (PoC) consensus mechanism.
+    It establishes the fundamental structures for validators, reputation management, and transaction processing.
+    
+    Classes:
+        BaseValidator
+        BaseReputationSystem
+        BaseTransaction
+    """
+    
+    from abc import ABC, abstractmethod
+    from typing import Dict, Any, Optional
+    
+    class BaseValidator(ABC):
+        """
+        BaseValidator is an abstract base class that defines the fundamental structure
+        for validators in the Proof of Cooperation (PoC) consensus mechanism.
+    
+        Validators are responsible for verifying transactions, creating blocks, and participating
+        in shard management, all while maintaining a cooperative reputation system.
+        """
+        
+        def __init__(self, node_id: str, cooperative_id: str):
+            """
+            Initialize a base validator with a unique node ID and cooperative ID.
+    
+            Args:
+                node_id (str): Unique identifier for the validator node.
+                cooperative_id (str): Identifier for the cooperative the node belongs to.
+            """
+            self.node_id = node_id
+            self.cooperative_id = cooperative_id
+            self.reputation: Dict[str, float] = {}  # Reputation scores across different categories
+            self.performance_metrics: Dict[str, float] = {}  # Track performance (e.g., availability)
+            self.cooldown: int = 0  # Track cooldown period after validation
+    
+        @abstractmethod
+        def validate_transaction(self, transaction: Any) -> bool:
+            """
+            Validate a given transaction. This method must be implemented by subclasses.
+    
+            Args:
+                transaction (Any): The transaction to validate.
+    
+            Returns:
+                bool: True if the transaction is valid, False otherwise.
+            """
+            pass
+    
+        @abstractmethod
+        def create_block(self) -> Optional[Any]:
+            """
+            Create a new block. This method must be implemented by subclasses.
+    
+            Returns:
+                Optional[Any]: The newly created block, or None if block creation fails.
+            """
+            pass
+    
+        def enter_cooldown(self, blocks: int) -> None:
+            """
+            Enter a cooldown period after successful validation.
+    
+            Args:
+                blocks (int): Number of blocks the validator must wait before participating again.
+            """
+            self.cooldown = blocks
+    
+        def reset_performance_metrics(self) -> None:
+            """
+            Reset performance metrics to prepare for the next validation cycle.
+            """
+            self.performance_metrics.clear()
+    
+    class BaseReputationSystem(ABC):
+        """
+        BaseReputationSystem is an abstract base class that defines the structure for managing
+        reputation within the PoC network.
+    
+        Reputation is a critical component of the consensus mechanism, influencing validator selection,
+        transaction validation, and cooperative interactions.
+        """
+        
+        def __init__(self):
+            self.reputation_scores: Dict[str, float] = {}  # Overall reputation scores for nodes
+    
+        @abstractmethod
+        def update_reputation(self, category: str, score: float, evidence: Optional[Dict] = None) -> None:
+            """
+            Update the reputation score for a specific category.
+    
+            Args:
+                category (str): The category of reputation to update (e.g., 'validation', 'cooperation').
+                score (float): The score to add or subtract from the category.
+                evidence (Optional[Dict]): Optional evidence to support the reputation change.
+            """
+            pass
+    
+        @abstractmethod
+        def get_reputation(self, category: str) -> float:
+            """
+            Get the current reputation score for a specific category.
+    
+            Args:
+                category (str): The category of reputation to retrieve.
+    
+            Returns:
+                float: The reputation score for the specified category.
+            """
+            pass
+    
+    class BaseTransaction(ABC):
+        """
+        BaseTransaction is an abstract base class that defines the structure for transactions
+        within the PoC network.
+    
+        Transactions represent the fundamental operations within the network, including transfers,
+        cooperative actions, and smart contract interactions.
+        """
+        
+        def __init__(self, sender: str, receiver: str, action: str, data: Dict[str, Any]):
+            """
+            Initialize a base transaction with sender, receiver, action, and data.
+    
+            Args:
+                sender (str): The sender's identifier.
+                receiver (str): The receiver's identifier.
+                action (str): The action to be performed by the transaction.
+                data (Dict[str, Any]): Additional data related to the transaction.
+            """
+            self.sender = sender
+            self.receiver = receiver
+            self.action = action
+            self.data = data
+    
+        @abstractmethod
+        def execute(self) -> bool:
+            """
+            Execute the transaction. This method must be implemented by subclasses.
+    
+            Returns:
+                bool: True if the transaction is executed successfully, False otherwise.
+            """
+            pass
+    
+        @abstractmethod
+        def validate(self) -> bool:
+            """
+            Validate the transaction. This method must be implemented by subclasses.
+    
+            Returns:
+                bool: True if the transaction is valid, False otherwise.
+            """
+            pass
+    
+        def get_cooperative_score(self) -> float:
+            """
+            Calculate the cooperative score of the transaction, based on its data and action.
+    
+            Returns:
+                float: The calculated cooperative score.
+            """
+            return self.data.get("cooperative_score", 0)
 ```
 
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py
-# Size: 0 bytes
-# Last Modified: Sat Oct 26 14:10:55 2024
+# Size: 6184 bytes
+# Last Modified: Sat Oct 26 18:37:07 2024
 # Language: py
 # ============================================================
 
 ```py
-
+    """
+    cooldown_manager.py
+    
+    This module manages dynamic cooldown periods for validators in the Proof of Cooperation (PoC) consensus mechanism.
+    It aims to prevent validator monopolization by adjusting cooldowns based on validator activity and network conditions.
+    
+    Classes:
+        CooldownManager
+    """
+    
+    from typing import List, Dict, Optional
+    from datetime import datetime, timedelta
+    from .types import Node
+    
+    class CooldownManager:
+        """
+        The CooldownManager is responsible for dynamically managing cooldown periods for validators
+        within the PoC mechanism. It adjusts cooldowns based on validator participation frequency,
+        network congestion, and other factors to ensure fair and diverse participation.
+    
+        Key Features:
+        - Dynamic cooldown adjustments to prevent validator monopolization.
+        - Cooldown periods vary based on validator activity, performance, and network load.
+        - Ensures that validators do not dominate consecutive validation rounds.
+        """
+        
+        def __init__(self, base_cooldown: int, max_cooldown: int):
+            """
+            Initialize the CooldownManager with base and maximum cooldown settings.
+    
+            Args:
+                base_cooldown (int): The initial cooldown period after validation.
+                max_cooldown (int): The maximum allowable cooldown period.
+            """
+            self.base_cooldown = base_cooldown
+            self.max_cooldown = max_cooldown
+            self.validator_activity: Dict[str, List[datetime]] = {}  # Track validator activity timestamps
+    
+        def apply_cooldown(self, validator: Node) -> None:
+            """
+            Apply a dynamic cooldown period to a validator based on its recent activity and performance.
+    
+            Cooldown Criteria:
+            - If a validator has participated frequently in recent blocks, the cooldown period increases.
+            - Validators with lower performance or reputation have longer cooldowns.
+            - Cooldowns decrease gradually if the validator has not participated recently.
+    
+            Args:
+                validator (Node): The validator to apply cooldown to.
+            """
+            # Track validator activity
+            self._track_activity(validator)
+    
+            # Calculate dynamic cooldown based on participation frequency and performance
+            participation_rate = self._calculate_participation_rate(validator)
+            performance_factor = 1 - (validator.performance_metrics.get('validation_success_rate', 0) / 100)
+    
+            # Adjust cooldown based on participation rate and performance
+            dynamic_cooldown = min(
+                int(self.base_cooldown * (1 + participation_rate * 2 + performance_factor)),
+                self.max_cooldown
+            )
+            
+            validator.cooldown = dynamic_cooldown
+    
+        def _track_activity(self, validator: Node) -> None:
+            """
+            Track the activity of a validator to determine participation frequency.
+    
+            Args:
+                validator (Node): The validator to track.
+            """
+            current_time = datetime.now()
+            if validator.node_id not in self.validator_activity:
+                self.validator_activity[validator.node_id] = []
+    
+            self.validator_activity[validator.node_id].append(current_time)
+    
+            # Maintain a limited history of activity timestamps for efficiency
+            self.validator_activity[validator.node_id] = [
+                timestamp for timestamp in self.validator_activity[validator.node_id]
+                if timestamp > current_time - timedelta(hours=1)
+            ]
+    
+        def _calculate_participation_rate(self, validator: Node) -> float:
+            """
+            Calculate the participation rate of a validator based on recent activity.
+    
+            The participation rate is determined by the number of blocks the validator
+            has participated in over a fixed period (e.g., the last hour).
+    
+            Args:
+                validator (Node): The validator to analyze.
+    
+            Returns:
+                float: The participation rate as a fraction of the maximum allowable rate.
+            """
+            max_participation_rate = 10  # Max participations allowed per hour (adjustable)
+            recent_participations = len(self.validator_activity.get(validator.node_id, []))
+    
+            return min(recent_participations / max_participation_rate, 1)
+    
+        def reset_cooldown(self, validator: Node) -> None:
+            """
+            Reset the cooldown period for a validator if it has not participated recently.
+    
+            This helps ensure validators are re-integrated into the validation process
+            after extended inactivity.
+    
+            Args:
+                validator (Node): The validator to reset.
+            """
+            # If validator has not participated in the last hour, reset cooldown
+            if not self.validator_activity.get(validator.node_id):
+                validator.cooldown = max(0, validator.cooldown - 1)
+    
+        def is_eligible(self, validator: Node) -> bool:
+            """
+            Check if a validator is eligible for participation based on its cooldown period.
+    
+            Args:
+                validator (Node): The validator to check.
+    
+            Returns:
+                bool: True if the validator is eligible, False otherwise.
+            """
+            return validator.cooldown <= 0
+    
+        def decay_cooldown(self) -> None:
+            """
+            Gradually reduce cooldowns for all validators over time to allow re-participation.
+    
+            This is called periodically to ensure validators can rejoin the pool after their cooldowns.
+            """
+            for validator_id, timestamps in self.validator_activity.items():
+                if timestamps and datetime.now() - timestamps[-1] > timedelta(minutes=10):
+                    node = self._get_validator_by_id(validator_id)
+                    if node:
+                        node.cooldown = max(0, node.cooldown - 1)
+    
+        def _get_validator_by_id(self, node_id: str) -> Optional[Node]:
+            """
+            Retrieve a validator by its node ID.
+    
+            Args:
+                node_id (str): The ID of the node to retrieve.
+    
+            Returns:
+                Optional[Node]: The validator node, or None if not found.
+            """
+            # This method should interface with a node management system to retrieve nodes
+            # Placeholder for integration with the broader PoC network
+            return None  # Replace with actual retrieval logic
 ```
 
 

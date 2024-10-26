@@ -1,0 +1,40 @@
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Testing Overview: testing_overview.md
+  - Workflows: workflows.md
+  - API:
+      - Overview: api/README.md
+      - Server: api/server.md
+  - Blockchain:
+      - Overview: blockchain/README.md
+      - Blockchain: blockchain/blockchain.md
+      - Core:
+          - Overview: blockchain/core/README.md
+          - Block: blockchain/core/block.md
+          - Node: blockchain/core/node.md
+          - Transaction: blockchain/core/transaction.md
+      - Shard:
+          - Overview: blockchain/core/shard/README.md
+          - State Manager: blockchain/core/shard/state_manager.md
+          - Transaction Manager: blockchain/core/shard/transaction_manager.md
+          - Validation Manager: blockchain/core/shard/validation_manager.md
+      - Utils:
+          - Overview: blockchain/utils/README.md
+          - Crypto: blockchain/utils/crypto.md
+          - Metrics: blockchain/utils/metrics.md
+          - Validation: blockchain/utils/validation.md
+  - DID:
+      - Overview: did/README.md
+      - DID: did/did.md
+      - Registry: did/registry.md
+  - Tests:
+      - Overview: tests/README.md
+      - Integration:
+          - Consensus Mechanism: tests/integration/test_consensus_mechanism.md
+          - Shard Management: tests/integration/test_shard_management.md
+      - Performance:
+          - Stress Resilience: tests/performance/test_stress_resilience.md
+      - Unit:
+          - Blockchain: tests/unit/test_blockchain.md
+          - Node: tests/unit/test_node.md

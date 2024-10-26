@@ -42,6 +42,13 @@
 # /home/matt/icn-prototype/blockchain/utils/validation.py - 8132 bytes - Included
 # /home/matt/icn-prototype/blockchain/utils/__init__.py - 201 bytes - Included
 # /home/matt/icn-prototype/blockchain/utils/crypto.py - 7870 bytes - Included
+# /home/matt/icn-prototype/blockchain/network/config.py - 10286 bytes - Included
+# /home/matt/icn-prototype/blockchain/network/manager.py - 20088 bytes - Included
+# /home/matt/icn-prototype/blockchain/network/discovery/discovery.py - 16429 bytes - Included
+# /home/matt/icn-prototype/blockchain/network/sync/sync_manager.py - 29290 bytes - Included
+# /home/matt/icn-prototype/blockchain/network/protocol/base.py - 10078 bytes - Included
+# /home/matt/icn-prototype/blockchain/network/protocol/dispatcher.py - 22324 bytes - Included
+# /home/matt/icn-prototype/blockchain/network/transport/transport.py - 15697 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/node.py - 9410 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/block.py - 8336 bytes - Included
 # /home/matt/icn-prototype/blockchain/core/transaction.py - 11471 bytes - Included
@@ -107,6 +114,7 @@ icn-prototype/
             test_transaction_processing.py
             test_smart_contract_execution.py
             __init__.py
+            network/
         performance/
             test_scalability.py
             test_stress_resilience.py
@@ -123,6 +131,7 @@ icn-prototype/
             test_blockchain.py
             test_smart_contract.py
             __init__.py
+            network/
     system/
         marketplace.py
         reputation.py
@@ -138,6 +147,18 @@ icn-prototype/
             validation.py
             __init__.py
             crypto.py
+        network/
+            config.py
+            manager.py
+            discovery/
+                discovery.py
+            sync/
+                sync_manager.py
+            protocol/
+                base.py
+                dispatcher.py
+            transport/
+                transport.py
         core/
             shard.py.backup
             node.py
@@ -8663,6 +8684,3565 @@ icn-prototype/
         except Exception as e:
             logger.error(f"HMAC verification failed: {str(e)}")
             return False
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/network/config.py
+# Size: 10286 bytes
+# Last Modified: Sat Oct 26 22:30:57 2024
+# Language: py
+# ============================================================
+
+```py
+    # ================================================================
+    # File: blockchain/network/config.py
+    # Description: Network configuration settings for the ICN network.
+    # Defines network parameters, protocols, and connection settings
+    # for the InterCooperative Network.
+    # ================================================================
+    
+    from dataclasses import dataclass, field
+    from typing import Dict, List, Optional, Set
+    import os
+    import json
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class NetworkConfig:
+        """Network configuration parameters."""
+        
+        # Node identification
+        node_id: str
+        cooperative_id: Optional[str] = None
+        
+        # Network addresses
+        host: str = "0.0.0.0"
+        port: int = 30303
+        discovery_port: int = 30304
+        
+        # Connection limits
+        max_peers: int = 50
+        min_peers: int = 10
+        max_connections_per_ip: int = 5
+        connection_timeout: int = 30
+        
+        # Protocol settings
+        supported_protocols: Set[str] = field(default_factory=lambda: {"icn/1.0", "icn/1.1"})
+        min_protocol_version: str = "icn/1.0"
+        max_message_size: int = 1024 * 1024  # 1MB
+        
+        # Discovery settings
+        discovery_interval: int = 300  # 5 minutes
+        bootstrap_nodes: List[Dict[str, Any]] = field(default_factory=list)
+        enable_auto_discovery: bool = True
+        discovery_methods: Set[str] = field(default_factory=lambda: {"broadcast", "bootstrap", "peer"})
+        
+        # Resource limits
+        max_inbound_connections: int = 40
+        max_outbound_connections: int = 20
+        max_pending_connections: int = 10
+        buffer_size: int = 1024 * 16  # 16KB
+        
+        # Performance settings
+        read_timeout: float = 30.0
+        write_timeout: float = 30.0
+        keepalive_interval: int = 60
+        ping_interval: int = 120
+        
+        # Security settings
+        enable_encryption: bool = True
+        require_node_id_verification: bool = True
+        blacklist_threshold: int = 3
+        reputation_threshold: float = 0.3
+        
+        # Cooperative settings
+        prioritize_cooperative_peers: bool = True
+        cooperative_connection_bonus: float = 0.2
+        min_cooperative_peers: int = 5
+        
+        # Metrics and monitoring
+        metrics_interval: int = 60
+        log_metrics: bool = True
+        enable_peer_scoring: bool = True
+        
+        @classmethod
+        def load_from_file(cls, filepath: str) -> 'NetworkConfig':
+            """
+            Load configuration from a JSON file.
+            
+            Args:
+                filepath: Path to configuration file
+                
+            Returns:
+                NetworkConfig: Loaded configuration
+            """
+            try:
+                if not os.path.exists(filepath):
+                    raise FileNotFoundError(f"Configuration file not found: {filepath}")
+                    
+                with open(filepath, 'r') as f:
+                    config_data = json.load(f)
+                    
+                # Validate required fields
+                if "node_id" not in config_data:
+                    raise ValueError("Configuration must include node_id")
+                    
+                return cls(**config_data)
+                
+            except Exception as e:
+                logger.error(f"Error loading network configuration: {str(e)}")
+                raise
+        
+        def save_to_file(self, filepath: str) -> None:
+            """
+            Save configuration to a JSON file.
+            
+            Args:
+                filepath: Path to save configuration to
+            """
+            try:
+                # Convert config to dictionary
+                config_dict = {
+                    "node_id": self.node_id,
+                    "cooperative_id": self.cooperative_id,
+                    "host": self.host,
+                    "port": self.port,
+                    "discovery_port": self.discovery_port,
+                    "max_peers": self.max_peers,
+                    "min_peers": self.min_peers,
+                    "max_connections_per_ip": self.max_connections_per_ip,
+                    "connection_timeout": self.connection_timeout,
+                    "supported_protocols": list(self.supported_protocols),
+                    "min_protocol_version": self.min_protocol_version,
+                    "max_message_size": self.max_message_size,
+                    "discovery_interval": self.discovery_interval,
+                    "bootstrap_nodes": self.bootstrap_nodes,
+                    "enable_auto_discovery": self.enable_auto_discovery,
+                    "discovery_methods": list(self.discovery_methods),
+                    "max_inbound_connections": self.max_inbound_connections,
+                    "max_outbound_connections": self.max_outbound_connections,
+                    "max_pending_connections": self.max_pending_connections,
+                    "buffer_size": self.buffer_size,
+                    "read_timeout": self.read_timeout,
+                    "write_timeout": self.write_timeout,
+                    "keepalive_interval": self.keepalive_interval,
+                    "ping_interval": self.ping_interval,
+                    "enable_encryption": self.enable_encryption,
+                    "require_node_id_verification": self.require_node_id_verification,
+                    "blacklist_threshold": self.blacklist_threshold,
+                    "reputation_threshold": self.reputation_threshold,
+                    "prioritize_cooperative_peers": self.prioritize_cooperative_peers,
+                    "cooperative_connection_bonus": self.cooperative_connection_bonus,
+                    "min_cooperative_peers": self.min_cooperative_peers,
+                    "metrics_interval": self.metrics_interval,
+                    "log_metrics": self.log_metrics,
+                    "enable_peer_scoring": self.enable_peer_scoring
+                }
+                
+                # Save to file
+                with open(filepath, 'w') as f:
+                    json.dump(config_dict, f, indent=4)
+                    
+                logger.info(f"Network configuration saved to {filepath}")
+                
+            except Exception as e:
+                logger.error(f"Error saving network configuration: {str(e)}")
+                raise
+        
+        def validate(self) -> bool:
+            """
+            Validate configuration settings.
+            
+            Returns:
+                bool: True if configuration is valid
+            """
+            try:
+                # Validate node identification
+                if not self.node_id or len(self.node_id) < 8:
+                    logger.error("Invalid node_id")
+                    return False
+                
+                # Validate network settings
+                if self.port < 1024 or self.port > 65535:
+                    logger.error("Invalid port number")
+                    return False
+                    
+                if self.discovery_port < 1024 or self.discovery_port > 65535:
+                    logger.error("Invalid discovery port")
+                    return False
+                    
+                # Validate connection limits
+                if self.max_peers < self.min_peers:
+                    logger.error("max_peers cannot be less than min_peers")
+                    return False
+                    
+                if self.max_inbound_connections + self.max_outbound_connections > self.max_peers:
+                    logger.error("Total connections cannot exceed max_peers")
+                    return False
+                    
+                # Validate timeouts
+                if self.read_timeout <= 0 or self.write_timeout <= 0:
+                    logger.error("Timeouts must be positive")
+                    return False
+                    
+                # Validate intervals
+                if (self.keepalive_interval <= 0 or self.ping_interval <= 0 or 
+                    self.metrics_interval <= 0 or self.discovery_interval <= 0):
+                    logger.error("Intervals must be positive")
+                    return False
+                    
+                # Validate thresholds
+                if self.reputation_threshold < 0 or self.reputation_threshold > 1:
+                    logger.error("Reputation threshold must be between 0 and 1")
+                    return False
+                    
+                # Validate cooperative settings
+                if self.min_cooperative_peers > self.max_peers:
+                    logger.error("min_cooperative_peers cannot exceed max_peers")
+                    return False
+                    
+                if self.cooperative_connection_bonus < 0 or self.cooperative_connection_bonus > 1:
+                    logger.error("cooperative_connection_bonus must be between 0 and 1")
+                    return False
+                    
+                # Validate protocol settings
+                if not self.supported_protocols:
+                    logger.error("Must support at least one protocol version")
+                    return False
+                    
+                if self.min_protocol_version not in self.supported_protocols:
+                    logger.error("min_protocol_version must be in supported_protocols")
+                    return False
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error validating configuration: {str(e)}")
+                return False
+        
+        def get_discovery_config(self) -> Dict[str, Any]:
+            """
+            Get discovery-specific configuration.
+            
+            Returns:
+                Dict[str, Any]: Discovery configuration parameters
+            """
+            return {
+                "port": self.discovery_port,
+                "interval": self.discovery_interval,
+                "bootstrap_nodes": self.bootstrap_nodes,
+                "enable_auto": self.enable_auto_discovery,
+                "methods": list(self.discovery_methods)
+            }
+        
+        def get_connection_limits(self) -> Dict[str, int]:
+            """
+            Get connection limit configuration.
+            
+            Returns:
+                Dict[str, int]: Connection limits
+            """
+            return {
+                "max_peers": self.max_peers,
+                "min_peers": self.min_peers,
+                "max_inbound": self.max_inbound_connections,
+                "max_outbound": self.max_outbound_connections,
+                "max_pending": self.max_pending_connections,
+                "max_per_ip": self.max_connections_per_ip
+            }
+    
+    # Default configuration
+    DEFAULT_CONFIG = NetworkConfig(
+        node_id="",  # Must be set by application
+        host="0.0.0.0",
+        port=30303,
+        discovery_port=30304,
+        bootstrap_nodes=[
+            {
+                "node_id": "bootstrap-1",
+                "address": "bootstrap1.icn.network",
+                "port": 30303
+            },
+            {
+                "node_id": "bootstrap-2",
+                "address": "bootstrap2.icn.network",
+                "port": 30303
+            }
+        ]
+    )
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/network/manager.py
+# Size: 20088 bytes
+# Last Modified: Sat Oct 26 22:27:34 2024
+# Language: py
+# ============================================================
+
+```py
+    # ================================================================
+    # File: blockchain/network/manager.py
+    # Description: Core network management for the ICN blockchain.
+    # This module handles P2P networking, message routing, and peer
+    # management for the InterCooperative Network.
+    # ================================================================
+    
+    import asyncio
+    import logging
+    import json
+    from typing import Dict, Set, Optional, Callable, Any, List
+    from datetime import datetime
+    from dataclasses import dataclass, field
+    import hashlib
+    import random
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class PeerInfo:
+        """Information about a connected peer."""
+        node_id: str
+        address: str
+        port: int
+        last_seen: datetime = field(default_factory=datetime.now)
+        reputation: float = 1.0
+        cooperative_id: Optional[str] = None
+        supported_protocols: Set[str] = field(default_factory=set)
+        connection_attempts: int = 0
+        is_active: bool = False
+        metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    @dataclass
+    class Message:
+        """Network message structure."""
+        message_type: str
+        payload: Dict[str, Any]
+        sender: str
+        timestamp: datetime = field(default_factory=datetime.now)
+        message_id: str = field(init=False)
+    
+        def __post_init__(self):
+            """Generate unique message ID after initialization."""
+            message_data = f"{self.message_type}:{self.sender}:{self.timestamp.isoformat()}"
+            self.message_id = hashlib.sha256(message_data.encode()).hexdigest()
+    
+    class NetworkManager:
+        """
+        Manages P2P networking for the ICN blockchain.
+        
+        Responsibilities:
+        - Peer discovery and connection management
+        - Message routing and broadcasting
+        - Network state monitoring
+        - Protocol version management
+        """
+    
+        def __init__(self, node_id: str, host: str, port: int, max_peers: int = 50):
+            """
+            Initialize the network manager.
+            
+            Args:
+                node_id: Unique identifier for this node
+                host: Host address to bind to
+                port: Port to listen on
+                max_peers: Maximum number of peer connections
+            """
+            self.node_id = node_id
+            self.host = host
+            self.port = port
+            self.max_peers = max_peers
+    
+            # Connection management
+            self.peers: Dict[str, PeerInfo] = {}
+            self.blacklisted_peers: Set[str] = set()
+            self.pending_connections: Set[str] = set()
+            self.connection_timeout = 30  # seconds
+    
+            # Message handling
+            self.message_handlers: Dict[str, List[Callable]] = {}
+            self.processed_messages: Set[str] = set()
+            self.message_cache_size = 1000
+    
+            # Protocol versioning
+            self.supported_protocols = {"icn/1.0", "icn/1.1"}
+            self.min_protocol_version = "icn/1.0"
+    
+            # State
+            self.is_running = False
+            self.server: Optional[asyncio.Server] = None
+            self.metrics: Dict[str, Any] = {
+                "messages_processed": 0,
+                "messages_sent": 0,
+                "failed_connections": 0,
+                "active_connections": 0
+            }
+    
+        async def start(self) -> None:
+            """Start the network manager and begin accepting connections."""
+            if self.is_running:
+                return
+    
+            try:
+                # Start TCP server
+                self.server = await asyncio.start_server(
+                    self._handle_connection,
+                    self.host,
+                    self.port
+                )
+                self.is_running = True
+                
+                # Start background tasks
+                asyncio.create_task(self._maintenance_loop())
+                asyncio.create_task(self._metrics_loop())
+                
+                logger.info(f"Network manager started on {self.host}:{self.port}")
+                
+                # Serve forever
+                async with self.server:
+                    await self.server.serve_forever()
+                    
+            except Exception as e:
+                logger.error(f"Failed to start network manager: {str(e)}")
+                raise
+    
+        async def stop(self) -> None:
+            """Stop the network manager and close all connections."""
+            if not self.is_running:
+                return
+    
+            try:
+                # Close all peer connections
+                close_tasks = [
+                    self._close_peer_connection(peer_id)
+                    for peer_id in list(self.peers.keys())
+                ]
+                await asyncio.gather(*close_tasks, return_exceptions=True)
+    
+                # Stop server
+                if self.server:
+                    self.server.close()
+                    await self.server.wait_closed()
+    
+                self.is_running = False
+                logger.info("Network manager stopped")
+    
+            except Exception as e:
+                logger.error(f"Error stopping network manager: {str(e)}")
+                raise
+    
+        async def connect_to_peer(self, peer_id: str, address: str, port: int) -> bool:
+            """
+            Establish connection to a new peer.
+            
+            Args:
+                peer_id: Unique identifier of the peer
+                address: Peer's network address
+                port: Peer's port number
+                
+            Returns:
+                bool: True if connection successful, False otherwise
+            """
+            if peer_id in self.blacklisted_peers:
+                logger.warning(f"Attempted to connect to blacklisted peer: {peer_id}")
+                return False
+    
+            if peer_id in self.peers:
+                logger.debug(f"Already connected to peer: {peer_id}")
+                return True
+    
+            if len(self.peers) >= self.max_peers:
+                logger.warning("Maximum peer connections reached")
+                return False
+    
+            try:
+                # Attempt TCP connection
+                reader, writer = await asyncio.open_connection(address, port)
+    
+                # Create peer info
+                peer_info = PeerInfo(
+                    node_id=peer_id,
+                    address=address,
+                    port=port
+                )
+    
+                # Perform handshake
+                if not await self._perform_handshake(reader, writer, peer_info):
+                    writer.close()
+                    await writer.wait_closed()
+                    return False
+    
+                # Store peer connection
+                self.peers[peer_id] = peer_info
+                self.metrics["active_connections"] += 1
+    
+                # Start message handling loop
+                asyncio.create_task(self._handle_peer_messages(reader, writer, peer_id))
+    
+                logger.info(f"Successfully connected to peer: {peer_id}")
+                return True
+    
+            except Exception as e:
+                logger.error(f"Failed to connect to peer {peer_id}: {str(e)}")
+                self.metrics["failed_connections"] += 1
+                return False
+    
+        async def broadcast_message(self, message_type: str, payload: Dict[str, Any]) -> None:
+            """
+            Broadcast a message to all connected peers.
+            
+            Args:
+                message_type: Type of message to broadcast
+                payload: Message payload data
+            """
+            message = Message(
+                message_type=message_type,
+                payload=payload,
+                sender=self.node_id
+            )
+    
+            try:
+                send_tasks = []
+                for peer_id, peer_info in self.peers.items():
+                    if peer_info.is_active:
+                        send_tasks.append(
+                            self._send_message_to_peer(peer_id, message)
+                        )
+    
+                await asyncio.gather(*send_tasks, return_exceptions=True)
+                self.metrics["messages_sent"] += len(send_tasks)
+    
+            except Exception as e:
+                logger.error(f"Error broadcasting message: {str(e)}")
+    
+        async def send_message(self, peer_id: str, message_type: str, payload: Dict[str, Any]) -> bool:
+            """
+            Send a message to a specific peer.
+            
+            Args:
+                peer_id: ID of the peer to send to
+                message_type: Type of message to send
+                payload: Message payload data
+                
+            Returns:
+                bool: True if message sent successfully, False otherwise
+            """
+            if peer_id not in self.peers:
+                logger.warning(f"Attempted to send message to unknown peer: {peer_id}")
+                return False
+    
+            message = Message(
+                message_type=message_type,
+                payload=payload,
+                sender=self.node_id
+            )
+    
+            try:
+                await self._send_message_to_peer(peer_id, message)
+                self.metrics["messages_sent"] += 1
+                return True
+    
+            except Exception as e:
+                logger.error(f"Failed to send message to peer {peer_id}: {str(e)}")
+                return False
+    
+        def register_message_handler(self, message_type: str, handler: Callable) -> None:
+            """
+            Register a handler function for a specific message type.
+            
+            Args:
+                message_type: Type of message to handle
+                handler: Callback function to handle messages of this type
+            """
+            if message_type not in self.message_handlers:
+                self.message_handlers[message_type] = []
+            self.message_handlers[message_type].append(handler)
+    
+        async def _handle_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            """Handle incoming peer connection."""
+            try:
+                # Receive handshake
+                handshake_data = await reader.read(1024)
+                handshake = json.loads(handshake_data.decode())
+    
+                peer_id = handshake.get("node_id")
+                if not peer_id:
+                    writer.close()
+                    return
+    
+                # Check if peer is blacklisted
+                if peer_id in self.blacklisted_peers:
+                    writer.close()
+                    return
+    
+                # Create peer info
+                peer_info = PeerInfo(
+                    node_id=peer_id,
+                    address=writer.get_extra_info('peername')[0],
+                    port=writer.get_extra_info('peername')[1]
+                )
+    
+                # Send handshake response
+                response = {
+                    "node_id": self.node_id,
+                    "protocols": list(self.supported_protocols)
+                }
+                writer.write(json.dumps(response).encode())
+                await writer.drain()
+    
+                # Store peer connection
+                self.peers[peer_id] = peer_info
+                self.metrics["active_connections"] += 1
+    
+                # Start message handling loop
+                asyncio.create_task(self._handle_peer_messages(reader, writer, peer_id))
+    
+            except Exception as e:
+                logger.error(f"Error handling connection: {str(e)}")
+                writer.close()
+    
+        async def _handle_peer_messages(
+            self,
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+            peer_id: str
+        ) -> None:
+            """Handle incoming messages from a peer."""
+            try:
+                while True:
+                    # Read message length
+                    length_data = await reader.readexactly(4)
+                    message_length = int.from_bytes(length_data, 'big')
+    
+                    # Read message data
+                    message_data = await reader.readexactly(message_length)
+                    message_dict = json.loads(message_data.decode())
+    
+                    # Create message object
+                    message = Message(
+                        message_type=message_dict["message_type"],
+                        payload=message_dict["payload"],
+                        sender=message_dict["sender"]
+                    )
+    
+                    # Process message if not seen before
+                    if message.message_id not in self.processed_messages:
+                        self.processed_messages.add(message.message_id)
+                        if len(self.processed_messages) > self.message_cache_size:
+                            self.processed_messages.pop()
+    
+                        # Call registered handlers
+                        handlers = self.message_handlers.get(message.message_type, [])
+                        for handler in handlers:
+                            try:
+                                await handler(message, peer_id)
+                            except Exception as e:
+                                logger.error(f"Error in message handler: {str(e)}")
+    
+                        self.metrics["messages_processed"] += 1
+    
+            except asyncio.IncompleteReadError:
+                # Connection closed
+                await self._close_peer_connection(peer_id)
+            except Exception as e:
+                logger.error(f"Error handling messages from peer {peer_id}: {str(e)}")
+                await self._close_peer_connection(peer_id)
+    
+        async def _send_message_to_peer(self, peer_id: str, message: Message) -> None:
+            """Send a message to a specific peer."""
+            if peer_id not in self.peers:
+                raise ValueError(f"Unknown peer: {peer_id}")
+    
+            # Serialize message
+            message_dict = {
+                "message_type": message.message_type,
+                "payload": message.payload,
+                "sender": message.sender,
+                "timestamp": message.timestamp.isoformat()
+            }
+            message_data = json.dumps(message_dict).encode()
+    
+            # Send message length followed by message data
+            message_length = len(message_data)
+            length_bytes = message_length.to_bytes(4, 'big')
+    
+            writer = self.peers[peer_id].writer
+            writer.write(length_bytes + message_data)
+            await writer.drain()
+    
+        async def _perform_handshake(
+            self,
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+            peer_info: PeerInfo
+        ) -> bool:
+            """Perform protocol handshake with a peer."""
+            try:
+                # Send handshake
+                handshake = {
+                    "node_id": self.node_id,
+                    "protocols": list(self.supported_protocols)
+                }
+                writer.write(json.dumps(handshake).encode())
+                await writer.drain()
+    
+                # Receive response
+                response_data = await reader.read(1024)
+                response = json.loads(response_data.decode())
+    
+                # Verify peer ID
+                if response.get("node_id") != peer_info.node_id:
+                    return False
+    
+                # Check protocol compatibility
+                peer_protocols = set(response.get("protocols", []))
+                if not peer_protocols & self.supported_protocols:
+                    return False
+    
+                peer_info.supported_protocols = peer_protocols
+                peer_info.is_active = True
+                return True
+    
+            except Exception as e:
+                logger.error(f"Handshake failed: {str(e)}")
+                return False
+    
+        async def _close_peer_connection(self, peer_id: str) -> None:
+            """Close connection with a peer."""
+            if peer_id in self.peers:
+                peer_info = self.peers[peer_id]
+                if hasattr(peer_info, 'writer'):
+                    peer_info.writer.close()
+                    await peer_info.writer.wait_closed()
+                del self.peers[peer_id]
+                self.metrics["active_connections"] -= 1
+    
+        async def _maintenance_loop(self) -> None:
+            """Periodic maintenance tasks."""
+            while self.is_running:
+                try:
+                    # Remove inactive peers
+                    now = datetime.now()
+                    for peer_id, peer_info in list(self.peers.items()):
+                        if (now - peer_info.last_seen).total_seconds() > 300:  # 5 minutes
+                            await self._close_peer_connection(peer_id)
+    
+                    # Clear old processed messages
+                    if len(self.processed_messages) > self.message_cache_size:
+                        self.processed_messages = set(
+                            list(self.processed_messages)[-self.message_cache_size:]
+                        )
+    
+                except Exception as e:
+                    logger.error(f"Error in maintenance loop: {str(e)}")
+    
+                await asyncio.sleep(60)
+                # Continuing from the previous NetworkManager class...
+    
+        async def _metrics_loop(self) -> None:
+            """Background task to update network metrics."""
+            while self.is_running:
+                try:
+                    # Update peer metrics
+                    active_peers = sum(1 for p in self.peers.values() if p.is_active)
+                    total_reputation = sum(p.reputation for p in self.peers.values())
+                    
+                    self.metrics.update({
+                        "active_peers": active_peers,
+                        "total_peers": len(self.peers),
+                        "average_reputation": total_reputation / max(1, len(self.peers)),
+                        "blacklisted_peers": len(self.blacklisted_peers),
+                        "pending_connections": len(self.pending_connections)
+                    })
+    
+                    # Log metrics
+                    if active_peers > 0:
+                        logger.info(f"Network metrics: {self.metrics}")
+    
+                except Exception as e:
+                    logger.error(f"Error updating metrics: {str(e)}")
+    
+                await asyncio.sleep(30)  # Update every 30 seconds
+    
+        def get_peer_info(self, peer_id: str) -> Optional[PeerInfo]:
+            """
+            Get information about a specific peer.
+            
+            Args:
+                peer_id: ID of the peer
+                
+            Returns:
+                Optional[PeerInfo]: Peer information if found
+            """
+            return self.peers.get(peer_id)
+    
+        def get_active_peers(self) -> List[PeerInfo]:
+            """
+            Get list of currently active peers.
+            
+            Returns:
+                List[PeerInfo]: List of active peer information
+            """
+            return [peer for peer in self.peers.values() if peer.is_active]
+    
+        def blacklist_peer(self, peer_id: str, reason: str) -> None:
+            """
+            Add a peer to the blacklist.
+            
+            Args:
+                peer_id: ID of the peer to blacklist
+                reason: Reason for blacklisting
+            """
+            self.blacklisted_peers.add(peer_id)
+            if peer_id in self.peers:
+                asyncio.create_task(self._close_peer_connection(peer_id))
+            logger.warning(f"Blacklisted peer {peer_id}: {reason}")
+    
+        def get_network_info(self) -> Dict[str, Any]:
+            """
+            Get comprehensive information about the network state.
+            
+            Returns:
+                Dict[str, Any]: Network state information
+            """
+            return {
+                "node_id": self.node_id,
+                "address": f"{self.host}:{self.port}",
+                "is_running": self.is_running,
+                "metrics": self.metrics.copy(),
+                "peers": {
+                    peer_id: {
+                        "address": f"{peer.address}:{peer.port}",
+                        "last_seen": peer.last_seen.isoformat(),
+                        "reputation": peer.reputation,
+                        "is_active": peer.is_active,
+                        "protocols": list(peer.supported_protocols)
+                    }
+                    for peer_id, peer in self.peers.items()
+                },
+                "protocols": list(self.supported_protocols),
+                "min_protocol": self.min_protocol_version
+            }
+    
+        async def ping_peer(self, peer_id: str) -> bool:
+            """
+            Send a ping message to check peer connectivity.
+            
+            Args:
+                peer_id: ID of the peer to ping
+                
+            Returns:
+                bool: True if ping successful, False otherwise
+            """
+            try:
+                ping_payload = {
+                    "timestamp": datetime.now().isoformat()
+                }
+                return await self.send_message(peer_id, "ping", ping_payload)
+            except Exception as e:
+                logger.error(f"Error pinging peer {peer_id}: {str(e)}")
+                return False
+    
+        def update_peer_reputation(self, peer_id: str, change: float) -> None:
+            """
+            Update a peer's reputation score.
+            
+            Args:
+                peer_id: ID of the peer
+                change: Amount to change reputation by (positive or negative)
+            """
+            if peer_id in self.peers:
+                peer = self.peers[peer_id]
+                peer.reputation = max(0.0, min(1.0, peer.reputation + change))
+                
+                # Blacklist peers with consistently bad reputation
+                if peer.reputation <= 0.1:
+                    self.blacklist_peer(peer_id, "Low reputation score")
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/network/discovery/discovery.py
+# Size: 16429 bytes
+# Last Modified: Sat Oct 26 22:29:28 2024
+# Language: py
+# ============================================================
+
+```py
+    # ================================================================
+    # File: blockchain/network/discovery/discovery.py
+    # Description: Peer discovery implementation for the ICN network.
+    # Handles automatic peer discovery, peer list management, and 
+    # connection bootstrapping for the InterCooperative Network.
+    # ================================================================
+    
+    import asyncio
+    import logging
+    import json
+    import random
+    from typing import Dict, Set, List, Optional, Any
+    from datetime import datetime, timedelta
+    from dataclasses import dataclass, field
+    import socket
+    import struct
+    import ipaddress
+    from hashlib import sha256
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class PeerRecord:
+        """Information about a discovered peer."""
+        node_id: str
+        address: str
+        port: int
+        last_seen: datetime = field(default_factory=datetime.now)
+        last_successful_connection: Optional[datetime] = None
+        connection_attempts: int = 0
+        is_bootstrap_node: bool = False
+        cooperative_id: Optional[str] = None
+        metadata: Dict[str, Any] = field(default_factory=dict)
+        
+        @property
+        def peer_score(self) -> float:
+            """Calculate peer score based on reliability and history."""
+            if self.is_bootstrap_node:
+                return 1.0
+                
+            # Base score starts at 0.5
+            score = 0.5
+            
+            # Increase score for successful connections
+            if self.last_successful_connection:
+                hours_since_connection = (datetime.now() - self.last_successful_connection).total_seconds() / 3600
+                if hours_since_connection < 24:
+                    score += 0.3
+                elif hours_since_connection < 72:
+                    score += 0.1
+                    
+            # Decrease score for failed connection attempts
+            score -= min(0.4, self.connection_attempts * 0.1)
+            
+            return max(0.0, min(1.0, score))
+    
+    class PeerDiscovery:
+        """
+        Manages peer discovery and connection management.
+        
+        Features:
+        - Automatic peer discovery using multiple methods
+        - Bootstrap node support
+        - Peer scoring and prioritization
+        - Connection attempt management
+        - Cooperative-aware peer selection
+        """
+        
+        def __init__(
+            self,
+            node_id: str,
+            host: str,
+            port: int,
+            bootstrap_nodes: List[Dict[str, Any]] = None,
+            max_peers: int = 50,
+            discovery_interval: int = 300
+        ):
+            """
+            Initialize the peer discovery system.
+            
+            Args:
+                node_id: Unique identifier for this node
+                host: Host address to bind to
+                port: Port to listen on
+                bootstrap_nodes: List of known bootstrap nodes
+                max_peers: Maximum number of peers to maintain
+                discovery_interval: Seconds between discovery attempts
+            """
+            self.node_id = node_id
+            self.host = host
+            self.port = port
+            self.max_peers = max_peers
+            self.discovery_interval = discovery_interval
+            
+            # Peer management
+            self.known_peers: Dict[str, PeerRecord] = {}
+            self.connected_peers: Set[str] = set()
+            self.blacklisted_peers: Set[str] = set()
+            self.pending_connections: Set[str] = set()
+            
+            # Bootstrap configuration
+            self.bootstrap_nodes = bootstrap_nodes or []
+            for node in self.bootstrap_nodes:
+                self._add_bootstrap_node(node)
+                
+            # Discovery state
+            self.is_running = False
+            self.last_discovery = datetime.now() - timedelta(seconds=discovery_interval)
+            
+            # UDP discovery
+            self.discovery_socket: Optional[socket.socket] = None
+            self.discovery_port = port + 1
+            
+            # Metrics
+            self.metrics = {
+                "total_discoveries": 0,
+                "successful_discoveries": 0,
+                "failed_discoveries": 0,
+                "total_connection_attempts": 0,
+                "successful_connections": 0,
+                "failed_connections": 0
+            }
+    
+        async def start(self) -> None:
+            """Start the peer discovery service."""
+            if self.is_running:
+                return
+                
+            try:
+                # Initialize UDP discovery socket
+                self.discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                self.discovery_socket.bind(('', self.discovery_port))
+                
+                self.is_running = True
+                
+                # Start background tasks
+                asyncio.create_task(self._discovery_loop())
+                asyncio.create_task(self._maintenance_loop())
+                asyncio.create_task(self._listen_for_broadcasts())
+                
+                logger.info(f"Peer discovery started on {self.host}:{self.port}")
+                
+            except Exception as e:
+                logger.error(f"Failed to start peer discovery: {str(e)}")
+                raise
+    
+        async def stop(self) -> None:
+            """Stop the peer discovery service."""
+            if not self.is_running:
+                return
+                
+            try:
+                self.is_running = False
+                
+                if self.discovery_socket:
+                    self.discovery_socket.close()
+                    
+                logger.info("Peer discovery stopped")
+                
+            except Exception as e:
+                logger.error(f"Error stopping peer discovery: {str(e)}")
+    
+        async def get_peers(self, count: int = 10, cooperative_id: Optional[str] = None) -> List[PeerRecord]:
+            """
+            Get a list of recommended peers to connect to.
+            
+            Args:
+                count: Number of peers to return
+                cooperative_id: Optional cooperative ID to prioritize
+                
+            Returns:
+                List[PeerRecord]: List of recommended peers
+            """
+            try:
+                # Filter and sort peers
+                available_peers = [
+                    peer for peer_id, peer in self.known_peers.items()
+                    if peer_id not in self.connected_peers
+                    and peer_id not in self.blacklisted_peers
+                    and peer_id not in self.pending_connections
+                    and (not cooperative_id or peer.cooperative_id == cooperative_id)
+                ]
+                
+                # Sort by score
+                available_peers.sort(key=lambda p: p.peer_score, reverse=True)
+                
+                return available_peers[:count]
+                
+            except Exception as e:
+                logger.error(f"Error getting peers: {str(e)}")
+                return []
+    
+        def add_peer(self, node_id: str, address: str, port: int, **kwargs) -> bool:
+            """
+            Add a new peer to the known peers list.
+            
+            Args:
+                node_id: Unique identifier of the peer
+                address: Peer's network address
+                port: Peer's port number
+                **kwargs: Additional peer metadata
+                
+            Returns:
+                bool: True if peer was added, False otherwise
+            """
+            try:
+                if node_id in self.blacklisted_peers:
+                    return False
+                    
+                if node_id not in self.known_peers:
+                    self.known_peers[node_id] = PeerRecord(
+                        node_id=node_id,
+                        address=address,
+                        port=port,
+                        cooperative_id=kwargs.get('cooperative_id'),
+                        metadata=kwargs
+                    )
+                else:
+                    # Update existing peer record
+                    peer = self.known_peers[node_id]
+                    peer.address = address
+                    peer.port = port
+                    peer.last_seen = datetime.now()
+                    peer.metadata.update(kwargs)
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error adding peer: {str(e)}")
+                return False
+    
+        def blacklist_peer(self, node_id: str, reason: str) -> None:
+            """
+            Add a peer to the blacklist.
+            
+            Args:
+                node_id: ID of the peer to blacklist
+                reason: Reason for blacklisting
+            """
+            self.blacklisted_peers.add(node_id)
+            if node_id in self.known_peers:
+                del self.known_peers[node_id]
+            logger.warning(f"Blacklisted peer {node_id}: {reason}")
+    
+        async def _discovery_loop(self) -> None:
+            """Background task for periodic peer discovery."""
+            while self.is_running:
+                try:
+                    # Check if discovery is needed
+                    now = datetime.now()
+                    if (now - self.last_discovery).total_seconds() < self.discovery_interval:
+                        await asyncio.sleep(5)
+                        continue
+                        
+                    self.last_discovery = now
+                    self.metrics["total_discoveries"] += 1
+                    
+                    # Perform discovery methods
+                    discovery_tasks = [
+                        self._broadcast_discovery(),
+                        self._query_bootstrap_nodes(),
+                        self._query_known_peers()
+                    ]
+                    
+                    results = await asyncio.gather(*discovery_tasks, return_exceptions=True)
+                    
+                    # Update metrics
+                    success = sum(1 for r in results if r and not isinstance(r, Exception))
+                    self.metrics["successful_discoveries"] += success
+                    self.metrics["failed_discoveries"] += (len(results) - success)
+                    
+                    # Log results
+                    logger.info(f"Discovery round completed: {success} successful methods")
+                    
+                except Exception as e:
+                    logger.error(f"Error in discovery loop: {str(e)}")
+                    
+                await asyncio.sleep(5)
+    
+        async def _maintenance_loop(self) -> None:
+            """Background task for peer list maintenance."""
+            while self.is_running:
+                try:
+                    now = datetime.now()
+                    
+                    # Remove old peers
+                    for peer_id in list(self.known_peers.keys()):
+                        peer = self.known_peers[peer_id]
+                        if not peer.is_bootstrap_node:
+                            if (now - peer.last_seen).total_seconds() > 3600:  # 1 hour
+                                del self.known_peers[peer_id]
+                    
+                    # Clear old pending connections
+                    self.pending_connections = {
+                        peer_id for peer_id in self.pending_connections
+                        if peer_id in self.known_peers
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"Error in maintenance loop: {str(e)}")
+                    
+                await asyncio.sleep(60)
+    
+        async def _broadcast_discovery(self) -> bool:
+            """Broadcast discovery message on local network."""
+            try:
+                # Prepare discovery message
+                message = {
+                    "node_id": self.node_id,
+                    "address": self.host,
+                    "port": self.port,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Broadcast message
+                data = json.dumps(message).encode()
+                self.discovery_socket.sendto(data, ('<broadcast>', self.discovery_port))
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error broadcasting discovery: {str(e)}")
+                return False
+    
+        async def _listen_for_broadcasts(self) -> None:
+            """Listen for discovery broadcasts from other nodes."""
+            while self.is_running:
+                try:
+                    # Receive broadcast
+                    data, addr = await asyncio.get_event_loop().sock_recvfrom(self.discovery_socket, 1024)
+                    message = json.loads(data.decode())
+                    
+                    # Validate message
+                    required_fields = {"node_id", "address", "port", "timestamp"}
+                    if not all(field in message for field in required_fields):
+                        continue
+                        
+                    # Add peer
+                    node_id = message["node_id"]
+                    if node_id != self.node_id:
+                        self.add_peer(
+                            node_id=node_id,
+                            address=message["address"],
+                            port=message["port"]
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"Error processing broadcast: {str(e)}")
+                    
+                await asyncio.sleep(0.1)
+    
+        async def _query_bootstrap_nodes(self) -> bool:
+            """Query bootstrap nodes for peer information."""
+            try:
+                # Query each bootstrap node
+                for node in self.bootstrap_nodes:
+                    try:
+                        # Create TCP connection
+                        reader, writer = await asyncio.open_connection(
+                            node["address"],
+                            node["port"]
+                        )
+                        
+                        # Send peer request
+                        request = {
+                            "message_type": "peer_request",
+                            "node_id": self.node_id,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        writer.write(json.dumps(request).encode())
+                        await writer.drain()
+                        
+                        # Read response
+                        data = await reader.read(8192)
+                        response = json.loads(data.decode())
+                        
+                        # Process peers
+                        for peer in response.get("peers", []):
+                            self.add_peer(**peer)
+                            
+                        writer.close()
+                        await writer.wait_closed()
+                        
+                    except Exception as e:
+                        logger.error(f"Error querying bootstrap node: {str(e)}")
+                        
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error in bootstrap node query: {str(e)}")
+                return False
+    
+        async def _query_known_peers(self) -> bool:
+            """Query known peers for their peer lists."""
+            try:
+                # Select random subset of known peers
+                sample_size = min(5, len(self.known_peers))
+                if sample_size == 0:
+                    return False
+                    
+                selected_peers = random.sample(list(self.known_peers.values()), sample_size)
+                
+                # Query each selected peer
+                for peer in selected_peers:
+                    try:
+                        # Create TCP connection
+                        reader, writer = await asyncio.open_connection(
+                            peer.address,
+                            peer.port
+                        )
+                        
+                        # Send peer request
+                        request = {
+                            "message_type": "peer_request",
+                            "node_id": self.node_id,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        writer.write(json.dumps(request).encode())
+                        await writer.drain()
+                        
+                        # Read response
+                        data = await reader.read(8192)
+                        response = json.loads(data.decode())
+                        
+                        # Process peers
+                        for peer_data in response.get("peers", []):
+                            self.add_peer(**peer_data)
+                            
+                        writer.close()
+                        await writer.wait_closed()
+                        
+                    except Exception as e:
+                        logger.error(f"Error querying peer {peer.node_id}: {str(e)}")
+                        peer.connection_attempts += 1
+                        
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error in known peer query: {str(e)}")
+                return False
+    
+        def _add_bootstrap_node(self, node: Dict[str, Any]) -> None:
+            """Add a bootstrap node to known peers."""
+            self.add_peer(
+                node_id=node["node_id"],
+                address=node["address"],
+                port=node["port"],
+                is_bootstrap_node=True
+            )
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/network/sync/sync_manager.py
+# Size: 29290 bytes
+# Last Modified: Sat Oct 26 22:39:02 2024
+# Language: py
+# ============================================================
+
+```py
+    # ================================================================
+    # File: blockchain/network/sync/sync_manager.py
+    # Description: State synchronization manager for ICN network.
+    # Handles blockchain state synchronization between nodes, including
+    # block synchronization, state verification, and chain reorganization.
+    # ================================================================
+    
+    import asyncio
+    import logging
+    from typing import Dict, Set, List, Optional, Tuple, Any
+    from dataclasses import dataclass, field
+    from datetime import datetime, timedelta
+    import json
+    import hashlib
+    from enum import Enum, auto
+    
+    from ..config import NetworkConfig
+    from ..protocol.dispatcher import MessageDispatcher, MessagePriority, MessageRoute
+    from ...core.block import Block
+    from ...core.transaction import Transaction
+    
+    logger = logging.getLogger(__name__)
+    
+    class SyncState(Enum):
+        """State of node synchronization."""
+        IDLE = auto()
+        SYNCING_HEADERS = auto()
+        SYNCING_BLOCKS = auto()
+        SYNCING_STATE = auto()
+        VERIFYING = auto()
+    
+    @dataclass
+    class SyncProgress:
+        """Track synchronization progress."""
+        start_height: int
+        current_height: int
+        target_height: int
+        start_time: datetime = field(default_factory=datetime.now)
+        blocks_processed: int = 0
+        blocks_verified: int = 0
+        failed_blocks: int = 0
+        state_size: int = 0
+        
+        @property
+        def progress_percentage(self) -> float:
+            """Calculate sync progress percentage."""
+            if self.target_height == self.start_height:
+                return 100.0
+            return (self.current_height - self.start_height) / (self.target_height - self.start_height) * 100
+    
+        @property
+        def blocks_per_second(self) -> float:
+            """Calculate block processing rate."""
+            elapsed = (datetime.now() - self.start_time).total_seconds()
+            if elapsed == 0:
+                return 0.0
+            return self.blocks_processed / elapsed
+    
+        @property
+        def estimated_time_remaining(self) -> timedelta:
+            """Estimate remaining sync time."""
+            if self.blocks_per_second == 0:
+                return timedelta(hours=999)  # Large value to indicate unknown
+            blocks_remaining = self.target_height - self.current_height
+            seconds_remaining = blocks_remaining / self.blocks_per_second
+            return timedelta(seconds=seconds_remaining)
+    
+    class SyncManager:
+        """
+        Manages blockchain state synchronization.
+        
+        Features:
+        - Block header synchronization
+        - Block data synchronization
+        - State verification
+        - Chain reorganization
+        - Checkpoint validation
+        - Parallel block downloading
+        - State snapshot handling
+        """
+    
+        def __init__(
+            self,
+            config: NetworkConfig,
+            dispatcher: MessageDispatcher,
+            chain,  # Actual blockchain instance
+            max_parallel_downloads: int = 10,
+            verify_interval: int = 100  # Verify every N blocks
+        ):
+            """Initialize the sync manager."""
+            self.config = config
+            self.dispatcher = dispatcher
+            self.chain = chain
+            self.max_parallel_downloads = max_parallel_downloads
+            self.verify_interval = verify_interval
+            
+            # Sync state
+            self.sync_state = SyncState.IDLE
+            self.current_sync: Optional[SyncProgress] = None
+            self.active_downloads: Set[int] = set()
+            self.downloaded_blocks: Dict[int, Block] = {}
+            self.verified_blocks: Set[int] = set()
+            self.failed_blocks: Set[int] = set()
+            
+            # Peer tracking
+            self.peer_heights: Dict[str, int] = {}
+            self.sync_peers: Set[str] = set()
+            self.banned_peers: Set[str] = set()
+            
+            # State verification
+            self.checkpoints: Dict[int, str] = {}  # height -> state root
+            self.state_roots: Dict[int, str] = {}  # height -> state root
+            
+            # Background tasks
+            self.sync_task: Optional[asyncio.Task] = None
+            self.verification_task: Optional[asyncio.Task] = None
+            
+            # Metrics
+            self.metrics = {
+                "total_syncs": 0,
+                "successful_syncs": 0,
+                "failed_syncs": 0,
+                "blocks_downloaded": 0,
+                "blocks_verified": 0,
+                "reorgs_processed": 0,
+                "average_sync_time": 0.0,
+            }
+    
+        async def start(self) -> None:
+            """Start the sync manager."""
+            # Register message handlers
+            self.dispatcher.register_handler(
+                "block_headers",
+                self._handle_block_headers,
+                priority=MessagePriority.HIGH
+            )
+            self.dispatcher.register_handler(
+                "block_data",
+                self._handle_block_data,
+                priority=MessagePriority.HIGH
+            )
+            self.dispatcher.register_handler(
+                "state_root",
+                self._handle_state_root,
+                priority=MessagePriority.MEDIUM
+            )
+            self.dispatcher.register_handler(
+                "checkpoint",
+                self._handle_checkpoint,
+                priority=MessagePriority.MEDIUM
+            )
+            
+            # Start verification task
+            self.verification_task = asyncio.create_task(self._verification_loop())
+            
+            logger.info("Sync manager started")
+    
+        async def stop(self) -> None:
+            """Stop the sync manager."""
+            if self.sync_task:
+                self.sync_task.cancel()
+                
+            if self.verification_task:
+                self.verification_task.cancel()
+                
+            logger.info("Sync manager stopped")
+    
+        async def start_sync(self, target_height: Optional[int] = None) -> bool:
+            """
+            Start blockchain synchronization.
+            
+            Args:
+                target_height: Optional target height to sync to
+                
+            Returns:
+                bool: True if sync started successfully
+            """
+            if self.sync_state != SyncState.IDLE:
+                logger.warning("Sync already in progress")
+                return False
+                
+            try:
+                # Get current chain height
+                current_height = self.chain.height
+                
+                # Find best peer height if no target specified
+                if target_height is None:
+                    peer_heights = list(self.peer_heights.values())
+                    if not peer_heights:
+                        logger.warning("No peers available for sync")
+                        return False
+                    target_height = max(peer_heights)
+                
+                if target_height <= current_height:
+                    logger.info("Chain already synced")
+                    return False
+                
+                # Initialize sync progress
+                self.current_sync = SyncProgress(
+                    start_height=current_height,
+                    current_height=current_height,
+                    target_height=target_height
+                )
+                
+                # Start sync task
+                self.sync_state = SyncState.SYNCING_HEADERS
+                self.sync_task = asyncio.create_task(self._sync_loop())
+                
+                logger.info(
+                    f"Starting sync from height {current_height} to {target_height}"
+                )
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error starting sync: {str(e)}")
+                return False
+    
+        def get_sync_progress(self) -> Optional[SyncProgress]:
+            """Get current sync progress."""
+            return self.current_sync
+    
+        def add_checkpoint(self, height: int, state_root: str) -> None:
+            """Add a trusted checkpoint."""
+            self.checkpoints[height] = state_root
+            logger.info(f"Added checkpoint at height {height}")
+    
+        async def verify_chain_state(self, height: Optional[int] = None) -> bool:
+            """
+            Verify chain state at specified height.
+            
+            Args:
+                height: Height to verify, defaults to current height
+                
+            Returns:
+                bool: True if state is valid
+            """
+            try:
+                if height is None:
+                    height = self.chain.height
+                    
+                # Get state root at height
+                state_root = await self._calculate_state_root(height)
+                if not state_root:
+                    return False
+                    
+                # Check against checkpoint if available
+                checkpoint_root = self.checkpoints.get(height)
+                if checkpoint_root and checkpoint_root != state_root:
+                    logger.error(f"State root mismatch at checkpoint {height}")
+                    return False
+                    
+                # Verify against peer state roots
+                peer_roots = await self._get_peer_state_roots(height)
+                if not peer_roots:
+                    return True  # No peers to verify against
+                    
+                # State is valid if it matches majority of peers
+                matching_peers = sum(1 for root in peer_roots if root == state_root)
+                return matching_peers > len(peer_roots) / 2
+                
+            except Exception as e:
+                logger.error(f"Error verifying chain state: {str(e)}")
+                return False
+    
+        async def _sync_loop(self) -> None:
+            """Main synchronization loop."""
+            try:
+                while self.sync_state != SyncState.IDLE:
+                    if self.sync_state == SyncState.SYNCING_HEADERS:
+                        await self._sync_headers()
+                    elif self.sync_state == SyncState.SYNCING_BLOCKS:
+                        await self._sync_blocks()
+                    elif self.sync_state == SyncState.SYNCING_STATE:
+                        await self._sync_state()
+                    elif self.sync_state == SyncState.VERIFYING:
+                        await self._verify_sync()
+                        
+                    await asyncio.sleep(0.1)
+                    
+            except asyncio.CancelledError:
+                logger.info("Sync loop cancelled")
+            except Exception as e:
+                logger.error(f"Error in sync loop: {str(e)}")
+                self.metrics["failed_syncs"] += 1
+                self.sync_state = SyncState.IDLE
+    
+        async def _sync_headers(self) -> None:
+            """Synchronize block headers."""
+            try:
+                if not self.current_sync:
+                    return
+                    
+                start_height = self.current_sync.current_height
+                target_height = self.current_sync.target_height
+                
+                # Request headers in batches
+                batch_size = 2000
+                current_height = start_height
+                
+                while current_height < target_height:
+                    end_height = min(current_height + batch_size, target_height)
+                    
+                    # Request headers from peers
+                    headers = await self._request_headers(
+                        current_height,
+                        end_height
+                    )
+                    
+                    if not headers:
+                        logger.error("Failed to get headers")
+                        self.sync_state = SyncState.IDLE
+                        return
+                        
+                    # Verify and store headers
+                    if not await self._verify_headers(headers):
+                        logger.error("Header verification failed")
+                        self.sync_state = SyncState.IDLE
+                        return
+                        
+                    current_height = end_height
+                    self.current_sync.current_height = current_height
+                    
+                # Move to block sync
+                self.sync_state = SyncState.SYNCING_BLOCKS
+                
+            except Exception as e:
+                logger.error(f"Error syncing headers: {str(e)}")
+                self.sync_state = SyncState.IDLE
+    
+        async def _sync_blocks(self) -> None:
+            """Synchronize full blocks."""
+            try:
+                if not self.current_sync:
+                    return
+                    
+                while len(self.active_downloads) < self.max_parallel_downloads:
+                    next_height = self._get_next_block_height()
+                    if next_height is None:
+                        if not self.active_downloads:
+                            # All blocks downloaded
+                            self.sync_state = SyncState.SYNCING_STATE
+                        break
+                        
+                    # Start block download
+                    self.active_downloads.add(next_height)
+                    asyncio.create_task(self._download_block(next_height))
+                    
+            except Exception as e:
+                logger.error(f"Error syncing blocks: {str(e)}")
+                self.sync_state = SyncState.IDLE
+    
+        async def _sync_state(self) -> None:
+            """Synchronize chain state."""
+            try:
+                if not self.current_sync:
+                    return
+                    
+                # Request state snapshot
+                state_data = await self._request_state_snapshot(
+                    self.current_sync.current_height
+                )
+                
+                if not state_data:
+                    logger.error("Failed to get state snapshot")
+                    self.sync_state = SyncState.IDLE
+                    return
+                    
+                # Verify state
+                if not await self._verify_state_snapshot(
+                    state_data,
+                    self.current_sync.current_height
+                ):
+                    logger.error("State verification failed")
+                    self.sync_state = SyncState.IDLE
+                    return
+                    
+                # Apply state
+                if not await self._apply_state_snapshot(state_data):
+                    logger.error("Failed to apply state snapshot")
+                    self.sync_state = SyncState.IDLE
+                    return
+                    
+                # Move to verification
+                self.sync_state = SyncState.VERIFYING
+                
+            except Exception as e:
+                logger.error(f"Error syncing state: {str(e)}")
+                self.sync_state = SyncState.IDLE
+    
+        async def _verification_loop(self) -> None:
+            """Periodic chain verification loop."""
+            while True:
+                try:
+                    if self.chain.height % self.verify_interval == 0:
+                        await self.verify_chain_state()
+                        
+                    await asyncio.sleep(10)
+                    
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Error in verification loop: {str(e)}")
+                    await asyncio.sleep(10)
+    
+        async def _request_headers(
+            self,
+            start_height: int,
+            end_height: int
+        ) -> Optional[List[Dict[str, Any]]]:
+            """Request block headers from peers."""
+            try:
+                response = await self.dispatcher.dispatch_message(
+                    "get_headers",
+                    {
+                        "start_height": start_height,
+                        "end_height": end_height
+                    },
+                    routing=MessageRoute(
+                        message_type="get_headers",
+                        target_shards=set(),
+                        target_cooperatives=set(),
+                        exclude_peers=self.banned_peers,
+                        broadcast=True
+                    ),
+                    wait_response=True
+                )
+                
+                if not response or "headers" not in response:
+                    return None
+                    
+                return response["headers"]
+                
+            except Exception as e:
+                logger.error(f"Error requesting headers: {str(e)}")
+                return None
+    
+        async def _verify_headers(self, headers: List[Dict[str, Any]]) -> bool:
+            """Verify block headers."""
+            try:
+                previous_hash = None
+                for header in headers:
+                    # Create block from header
+                    block = Block.from_dict(header)
+                    
+                    # Verify hash chain
+                    if previous_hash and block.previous_hash != previous_hash:
+                        return False
+                        
+                    previous_hash = block.hash
+                    
+                    # Store header
+                    self.chain.add_block_header(block)
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying headers: {str(e)}")
+                return False
+    
+        def _get_next_block_height(self) -> Optional[int]:
+            """Get next block height to download."""
+            if not self.current_sync:
+                return None
+                
+            current_height = self.current_sync.current_height
+            target_height = self.current_sync.target_height
+            
+            for height in range(current_height, target_height + 1):
+                if (height not in self.active_downloads and
+                    height not in self.downloaded_blocks and
+                    height not in self.failed_blocks):
+                    return height
+                    
+            return None
+    
+        async def _download_block(self, height: int) -> None:
+            """Download a specific block."""
+            try:
+                # Request block from peers
+                response = await self.dispatcher.dispatch_message(
+                    "get_block",
+                    {"height": height},
+                    routing=MessageRoute(
+                        message_type="get_block",
+                        target_shards=set(),
+                        target_cooperatives=set(),
+                        exclude_peers=self.banned_peers,
+                        broadcast=True
+                    ),
+                    wait_response=True
+                )
+                
+                if not response or "block" not in response:
+                    logger.error(f"Failed to download block at height {height}")
+                    self.failed_blocks.add(height)
+                    return
+                    
+                # Create and verify block
+                block = Block.from_dict(response["block"])
+                if not await self._verify_block(block):
+                    logger.error(f"Block verification failed at height {height}")
+                    self.failed_blocks.add(height)
+                    return
+                    
+                # Store block
+                self.downloaded_blocks[height] = block
+                self.current_sync.blocks_processed += 1
+                self.metrics["blocks_downloaded"] += 1
+                
+            except Exception as e:
+                logger.error(f"Error downloading block {height}: {str(e)}")
+                self.failed_blocks.add(height)
+                
+            finally:
+                self.active_downloads.discard(height)
+    
+        async def _verify_block(self, block: Block) -> bool:
+            """Verify a downloaded block."""
+            try:
+                # Verify basic structure
+                if not block.validate(None):  # Pass None as we don't have previous block here
+                    return False
+                    
+                # Verify transactions
+                for tx in block.transactions:
+                    if not await self._verify_transaction(tx):
+                        return False
+                        
+                # Verify state transitions
+                if not await self._verify_state_transitions(block):
+                    return False
+                    
+                # Verify cooperative signatures if present
+                if not await self._verify_signatures(block):
+                    return False
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying block: {str(e)}")
+                return False
+    
+        async def _verify_transaction(self, transaction: Transaction) -> bool:
+            """Verify a transaction within a block."""
+            try:
+                # Basic validation
+                if not transaction.validate():
+                    return False
+                    
+                # Verify signatures
+                if not transaction.verify_signatures():
+                    return False
+                    
+                # Verify state transitions
+                if not await self._verify_transaction_state(transaction):
+                    return False
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying transaction: {str(e)}")
+                return False
+    
+        async def _verify_transaction_state(self, transaction: Transaction) -> bool:
+            """Verify transaction state transitions."""
+            try:
+                # Get pre-state
+                pre_state = await self._get_account_state(transaction.sender)
+                
+                # Verify sender has sufficient resources
+                if not await self._verify_resource_availability(transaction, pre_state):
+                    return False
+                    
+                # Verify state transition rules
+                if not await self._verify_transition_rules(transaction, pre_state):
+                    return False
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying transaction state: {str(e)}")
+                return False
+    
+        async def _verify_state_transitions(self, block: Block) -> bool:
+            """Verify state transitions in a block."""
+            try:
+                # Get pre-block state
+                pre_state = await self._get_block_state(block.previous_hash)
+                
+                # Apply all transactions
+                current_state = pre_state.copy()
+                for tx in block.transactions:
+                    if not await self._apply_transaction(tx, current_state):
+                        return False
+                        
+                # Verify final state matches block's state root
+                state_root = self._calculate_state_root_from_state(current_state)
+                return state_root == block.state_root
+                
+            except Exception as e:
+                logger.error(f"Error verifying state transitions: {str(e)}")
+                return False
+    
+        async def _verify_signatures(self, block: Block) -> bool:
+            """Verify cooperative signatures on block."""
+            try:
+                # Get required signers
+                required_signers = await self._get_required_signers(block)
+                
+                # Verify all required signatures are present
+                for signer in required_signers:
+                    if not await self._verify_signer_signature(block, signer):
+                        return False
+                        
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying signatures: {str(e)}")
+                return False
+    
+        async def _apply_blocks(self) -> bool:
+            """Apply downloaded blocks to chain."""
+            try:
+                if not self.current_sync:
+                    return False
+                    
+                current_height = self.current_sync.start_height
+                target_height = self.current_sync.target_height
+                
+                while current_height <= target_height:
+                    # Get block
+                    block = self.downloaded_blocks.get(current_height)
+                    if not block:
+                        return False
+                        
+                    # Apply block
+                    if not await self.chain.add_block(block):
+                        return False
+                        
+                    # Update state roots
+                    self.state_roots[current_height] = block.state_root
+                    
+                    current_height += 1
+                    self.current_sync.blocks_verified += 1
+                    self.metrics["blocks_verified"] += 1
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error applying blocks: {str(e)}")
+                return False
+    
+        async def _request_state_snapshot(self, height: int) -> Optional[Dict[str, Any]]:
+            """Request state snapshot from peers."""
+            try:
+                response = await self.dispatcher.dispatch_message(
+                    "get_state_snapshot",
+                    {"height": height},
+                    routing=MessageRoute(
+                        message_type="get_state_snapshot",
+                        target_shards=set(),
+                        target_cooperatives=set(),
+                        exclude_peers=self.banned_peers,
+                        broadcast=True
+                    ),
+                    wait_response=True
+                )
+                
+                if not response or "state" not in response:
+                    return None
+                    
+                return response["state"]
+                
+            except Exception as e:
+                logger.error(f"Error requesting state snapshot: {str(e)}")
+                return None
+    
+        async def _verify_state_snapshot(self, state_data: Dict[str, Any], height: int) -> bool:
+            """Verify state snapshot integrity."""
+            try:
+                # Calculate state root
+                state_root = self._calculate_state_root_from_state(state_data)
+                
+                # Verify against block state root
+                block_state_root = self.state_roots.get(height)
+                if block_state_root and state_root != block_state_root:
+                    return False
+                    
+                # Verify against checkpoint if available
+                checkpoint_root = self.checkpoints.get(height)
+                if checkpoint_root and state_root != checkpoint_root:
+                    return False
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying state snapshot: {str(e)}")
+                return False
+    
+        async def _apply_state_snapshot(self, state_data: Dict[str, Any]) -> bool:
+            """Apply verified state snapshot."""
+            try:
+                # Backup current state
+                await self._backup_current_state()
+                
+                # Apply new state
+                return await self.chain.apply_state(state_data)
+                
+            except Exception as e:
+                logger.error(f"Error applying state snapshot: {str(e)}")
+                return False
+    
+        async def _verify_sync(self) -> None:
+            """Verify completed synchronization."""
+            try:
+                if not self.current_sync:
+                    return
+                    
+                # Verify chain continuity
+                if not await self._verify_chain_continuity():
+                    logger.error("Chain continuity verification failed")
+                    self.sync_state = SyncState.IDLE
+                    return
+                    
+                # Verify final state
+                if not await self.verify_chain_state():
+                    logger.error("Final state verification failed")
+                    self.sync_state = SyncState.IDLE
+                    return
+                    
+                # Sync completed successfully
+                logger.info(
+                    f"Sync completed successfully at height {self.current_sync.target_height}"
+                )
+                
+                self.metrics["successful_syncs"] += 1
+                self.sync_state = SyncState.IDLE
+                self.current_sync = None
+                
+            except Exception as e:
+                logger.error(f"Error verifying sync: {str(e)}")
+                self.sync_state = SyncState.IDLE
+    
+        async def _backup_current_state(self) -> None:
+            """Backup current chain state."""
+            try:
+                # TODO: Implement state backup
+                pass
+            except Exception as e:
+                logger.error(f"Error backing up state: {str(e)}")
+                raise
+    
+        async def _verify_chain_continuity(self) -> bool:
+            """Verify continuity of synchronized chain."""
+            try:
+                if not self.current_sync:
+                    return False
+                    
+                current_height = self.current_sync.start_height
+                target_height = self.current_sync.target_height
+                
+                previous_hash = None
+                while current_height <= target_height:
+                    block = await self.chain.get_block(current_height)
+                    if not block:
+                        return False
+                        
+                    if previous_hash and block.previous_hash != previous_hash:
+                        return False
+                        
+                    previous_hash = block.hash
+                    current_height += 1
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying chain continuity: {str(e)}")
+                return False
+    
+        def get_metrics(self) -> Dict[str, Any]:
+            """Get sync manager metrics."""
+            metrics = self.metrics.copy()
+            
+            if self.current_sync:
+                metrics.update({
+                    "sync_progress": self.current_sync.progress_percentage,
+                    "blocks_per_second": self.current_sync.blocks_per_second,
+                    "estimated_time_remaining": str(self.current_sync.estimated_time_remaining),
+                    "current_height": self.current_sync.current_height,
+                    "target_height": self.current_sync.target_height
+                })
+                
+            return metrics
+    
+    # Example usage
+    async def example_usage():
+        config = NetworkConfig(node_id="test_node")
+        dispatcher = MessageDispatcher(config, None)  # Pass proper transport
+        chain = None  # Pass actual blockchain instance
+        
+        sync_manager = SyncManager(config, dispatcher, chain)
+        await sync_manager.start()
+        
+        # Start sync
+        await sync_manager.start_sync(1000)  # Sync to height 1000
+        
+        # Wait for sync to complete
+        while sync_manager.get_sync_progress():
+            progress = sync_manager.get_sync_progress()
+            print(f"Sync progress: {progress.progress_percentage:.2f}%")
+            await asyncio.sleep(1)
+        
+        await sync_manager.stop()
+    
+    if __name__ == "__main__":
+        asyncio.run(example_usage())
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/network/protocol/base.py
+# Size: 10078 bytes
+# Last Modified: Sat Oct 26 22:27:50 2024
+# Language: py
+# ============================================================
+
+```py
+    # ================================================================
+    # File: blockchain/network/protocol/base.py
+    # Description: Base protocol implementation for ICN network communication.
+    # This module defines the core protocol structures and message types
+    # used for node communication in the InterCooperative Network.
+    # ================================================================
+    
+    from abc import ABC, abstractmethod
+    from typing import Dict, Any, Optional, List
+    from datetime import datetime
+    import json
+    import logging
+    from dataclasses import dataclass, field
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class ProtocolMessage:
+        """Base class for all protocol messages."""
+        message_type: str
+        version: str
+        payload: Dict[str, Any]
+        timestamp: datetime = field(default_factory=datetime.now)
+        sequence: int = field(default_factory=lambda: 0)
+        
+        def serialize(self) -> bytes:
+            """Convert message to bytes for transmission."""
+            message_dict = {
+                "type": self.message_type,
+                "version": self.version,
+                "payload": self.payload,
+                "timestamp": self.timestamp.isoformat(),
+                "sequence": self.sequence
+            }
+            return json.dumps(message_dict).encode()
+        
+        @classmethod
+        def deserialize(cls, data: bytes) -> 'ProtocolMessage':
+            """Create message from received bytes."""
+            message_dict = json.loads(data.decode())
+            return cls(
+                message_type=message_dict["type"],
+                version=message_dict["version"],
+                payload=message_dict["payload"],
+                timestamp=datetime.fromisoformat(message_dict["timestamp"]),
+                sequence=message_dict["sequence"]
+            )
+    
+    class Protocol(ABC):
+        """Base class for network protocols."""
+        
+        def __init__(self, version: str):
+            self.version = version
+            self.message_handlers: Dict[str, List[callable]] = {}
+            self.sequence_counter = 0
+        
+        @abstractmethod
+        async def handle_message(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            """
+            Handle an incoming protocol message.
+            
+            Args:
+                message: The received message
+                
+            Returns:
+                Optional[ProtocolMessage]: Response message if any
+            """
+            pass
+        
+        @abstractmethod
+        async def create_message(self, message_type: str, payload: Dict[str, Any]) -> ProtocolMessage:
+            """
+            Create a new protocol message.
+            
+            Args:
+                message_type: Type of message to create
+                payload: Message payload
+                
+            Returns:
+                ProtocolMessage: The created message
+            """
+            pass
+    
+    class HandshakeProtocol(Protocol):
+        """Protocol implementation for peer handshakes."""
+        
+        def __init__(self):
+            super().__init__("icn/1.0")
+            
+        async def handle_message(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            if message.message_type == "handshake_init":
+                return await self.create_message("handshake_ack", {
+                    "accepted": True,
+                    "supported_protocols": ["icn/1.0", "icn/1.1"]
+                })
+            return None
+            
+        async def create_message(self, message_type: str, payload: Dict[str, Any]) -> ProtocolMessage:
+            self.sequence_counter += 1
+            return ProtocolMessage(
+                message_type=message_type,
+                version=self.version,
+                payload=payload,
+                sequence=self.sequence_counter
+            )
+    
+    class ConsensusProtocol(Protocol):
+        """Protocol implementation for consensus-related messages."""
+        
+        def __init__(self):
+            super().__init__("icn/1.0")
+            
+        async def handle_message(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            handlers = {
+                "block_proposal": self._handle_block_proposal,
+                "block_validation": self._handle_block_validation,
+                "validation_result": self._handle_validation_result
+            }
+            
+            handler = handlers.get(message.message_type)
+            if handler:
+                return await handler(message)
+            return None
+            
+        async def create_message(self, message_type: str, payload: Dict[str, Any]) -> ProtocolMessage:
+            self.sequence_counter += 1
+            return ProtocolMessage(
+                message_type=message_type,
+                version=self.version,
+                payload=payload,
+                sequence=self.sequence_counter
+            )
+        
+        async def _handle_block_proposal(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            """Handle incoming block proposal."""
+            try:
+                # Validate block proposal
+                block_data = message.payload.get("block")
+                if not block_data:
+                    return await self.create_message("block_validation", {
+                        "accepted": False,
+                        "reason": "Missing block data"
+                    })
+                
+                # TODO: Implement actual block validation logic
+                
+                return await self.create_message("block_validation", {
+                    "accepted": True,
+                    "block_hash": block_data.get("hash")
+                })
+                
+            except Exception as e:
+                logger.error(f"Error handling block proposal: {str(e)}")
+                return await self.create_message("block_validation", {
+                    "accepted": False,
+                    "reason": str(e)
+                })
+        
+        async def _handle_block_validation(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            """Handle block validation message."""
+            try:
+                validation_result = message.payload.get("accepted", False)
+                if validation_result:
+                    # TODO: Implement validation confirmation logic
+                    return None
+                
+                reason = message.payload.get("reason", "Unknown reason")
+                logger.warning(f"Block validation failed: {reason}")
+                return None
+                
+            except Exception as e:
+                logger.error(f"Error handling block validation: {str(e)}")
+                return None
+        
+        async def _handle_validation_result(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            """Handle validation result message."""
+            try:
+                # Process validation result
+                result = message.payload.get("result", {})
+                block_hash = result.get("block_hash")
+                is_valid = result.get("is_valid", False)
+                
+                if is_valid:
+                    # TODO: Implement logic for accepted validation
+                    pass
+                else:
+                    reason = result.get("reason", "Unknown reason")
+                    logger.warning(f"Validation rejected for block {block_hash}: {reason}")
+                
+                return None
+                
+            except Exception as e:
+                logger.error(f"Error handling validation result: {str(e)}")
+                return None
+    
+    class SyncProtocol(Protocol):
+        """Protocol implementation for state synchronization."""
+        
+        def __init__(self):
+            super().__init__("icn/1.0")
+            
+        async def handle_message(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            handlers = {
+                "sync_request": self._handle_sync_request,
+                "sync_response": self._handle_sync_response,
+                "sync_complete": self._handle_sync_complete
+            }
+            
+            handler = handlers.get(message.message_type)
+            if handler:
+                return await handler(message)
+            return None
+            
+        async def create_message(self, message_type: str, payload: Dict[str, Any]) -> ProtocolMessage:
+            self.sequence_counter += 1
+            return ProtocolMessage(
+                message_type=message_type,
+                version=self.version,
+                payload=payload,
+                sequence=self.sequence_counter
+            )
+        
+        async def _handle_sync_request(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            """Handle state sync request."""
+            try:
+                # Get sync parameters
+                start_block = message.payload.get("start_block", 0)
+                end_block = message.payload.get("end_block")
+                
+                # TODO: Implement state gathering logic
+                
+                return await self.create_message("sync_response", {
+                    "start_block": start_block,
+                    "end_block": end_block,
+                    "state": {}  # Add actual state data
+                })
+                
+            except Exception as e:
+                logger.error(f"Error handling sync request: {str(e)}")
+                return await self.create_message("sync_response", {
+                    "error": str(e)
+                })
+        
+        async def _handle_sync_response(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            """Handle state sync response."""
+            try:
+                state_data = message.payload.get("state", {})
+                if not state_data:
+                    return None
+                
+                # TODO: Implement state application logic
+                
+                return await self.create_message("sync_complete", {
+                    "success": True
+                })
+                
+            except Exception as e:
+                logger.error(f"Error handling sync response: {str(e)}")
+                return await self.create_message("sync_complete", {
+                    "success": False,
+                    "error": str(e)
+                })
+        
+        async def _handle_sync_complete(self, message: ProtocolMessage) -> Optional[ProtocolMessage]:
+            """Handle sync completion message."""
+            try:
+                success = message.payload.get("success", False)
+                if not success:
+                    error = message.payload.get("error", "Unknown error")
+                    logger.error(f"Sync failed: {error}")
+                
+                # TODO: Implement sync completion logic
+                
+                return None
+                
+            except Exception as e:
+                logger.error(f"Error handling sync complete: {str(e)}")
+                return None
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/network/protocol/dispatcher.py
+# Size: 22324 bytes
+# Last Modified: Sat Oct 26 22:35:59 2024
+# Language: py
+# ============================================================
+
+```py
+    # ================================================================
+    # File: blockchain/network/protocol/dispatcher.py
+    # Description: Message dispatcher for ICN network.
+    # Handles routing and processing of network messages, providing a
+    # centralized point for message handling and distribution.
+    # ================================================================
+    
+    import asyncio
+    import logging
+    from typing import Dict, Set, List, Optional, Callable, Any, Union
+    from dataclasses import dataclass, field
+    from datetime import datetime
+    import json
+    from enum import Enum, auto
+    import hashlib
+    import traceback
+    
+    from ..config import NetworkConfig
+    from ..transport.transport import NetworkTransport, MessageFrame
+    
+    logger = logging.getLogger(__name__)
+    
+    class MessagePriority(Enum):
+        """Message priority levels."""
+        HIGH = auto()    # Critical messages (consensus, block propagation)
+        MEDIUM = auto()  # Important but not critical (transaction propagation)
+        LOW = auto()     # Regular messages (peer discovery, metrics)
+    
+    @dataclass
+    class MessageHandler:
+        """Registered message handler information."""
+        callback: Callable
+        priority: MessagePriority
+        requires_response: bool = False
+        timeout: float = 30.0
+        cooperative_only: bool = False
+        max_size: Optional[int] = None
+        version_requirements: Optional[Set[str]] = None
+    
+    @dataclass
+    class PendingResponse:
+        """Tracks pending message responses."""
+        message_id: str
+        sender: str
+        timestamp: datetime
+        timeout: float
+        future: asyncio.Future
+        message_type: str
+    
+    @dataclass
+    class MessageRoute:
+        """Message routing information."""
+        message_type: str
+        target_shards: Set[int]
+        target_cooperatives: Set[str]
+        exclude_peers: Set[str]
+        broadcast: bool = False
+        local_only: bool = False
+    
+    class MessageDispatcher:
+        """
+        Central message handling and routing system.
+        
+        Features:
+        - Priority-based message processing
+        - Message routing and filtering
+        - Request-response handling
+        - Cross-shard message propagation
+        - Cooperative-aware message distribution
+        - Message validation and rate limiting
+        """
+    
+        def __init__(self, config: NetworkConfig, transport: NetworkTransport):
+            """
+            Initialize the message dispatcher.
+            
+            Args:
+                config: Network configuration
+                transport: Network transport layer
+            """
+            self.config = config
+            self.transport = transport
+            
+            # Message handling
+            self.handlers: Dict[str, MessageHandler] = {}
+            self.pending_responses: Dict[str, PendingResponse] = {}
+            
+            # Message queues (priority-based)
+            self.high_priority_queue: asyncio.Queue = asyncio.Queue()
+            self.medium_priority_queue: asyncio.Queue = asyncio.Queue()
+            self.low_priority_queue: asyncio.Queue = asyncio.Queue()
+            
+            # Rate limiting
+            self.message_counts: Dict[str, int] = {}  # peer_id -> count
+            self.message_timestamps: Dict[str, List[datetime]] = {}  # peer_id -> timestamps
+            self.rate_limit_window = 60  # seconds
+            self.rate_limit_max = 1000  # messages per window
+            
+            # State
+            self.is_running = False
+            self.processing_tasks: Set[asyncio.Task] = set()
+            
+            # Metrics
+            self.metrics = {
+                "messages_processed": 0,
+                "messages_routed": 0,
+                "messages_dropped": 0,
+                "responses_received": 0,
+                "responses_timed_out": 0,
+                "rate_limit_violations": 0
+            }
+    
+        async def start(self) -> None:
+            """Start the message dispatcher."""
+            if self.is_running:
+                return
+                
+            try:
+                self.is_running = True
+                
+                # Start worker tasks for each priority queue
+                self.processing_tasks.add(
+                    asyncio.create_task(self._process_queue(
+                        self.high_priority_queue,
+                        "high"
+                    ))
+                )
+                self.processing_tasks.add(
+                    asyncio.create_task(self._process_queue(
+                        self.medium_priority_queue,
+                        "medium"
+                    ))
+                )
+                self.processing_tasks.add(
+                    asyncio.create_task(self._process_queue(
+                        self.low_priority_queue,
+                        "low"
+                    ))
+                )
+                
+                # Start maintenance task
+                self.processing_tasks.add(
+                    asyncio.create_task(self._maintenance_loop())
+                )
+                
+                logger.info("Message dispatcher started")
+                
+            except Exception as e:
+                logger.error(f"Error starting message dispatcher: {str(e)}")
+                raise
+    
+        async def stop(self) -> None:
+            """Stop the message dispatcher."""
+            if not self.is_running:
+                return
+                
+            try:
+                self.is_running = False
+                
+                # Cancel all pending responses
+                for pending in self.pending_responses.values():
+                    if not pending.future.done():
+                        pending.future.cancel()
+                
+                # Cancel all processing tasks
+                for task in self.processing_tasks:
+                    task.cancel()
+                    
+                await asyncio.gather(*self.processing_tasks, return_exceptions=True)
+                self.processing_tasks.clear()
+                
+                logger.info("Message dispatcher stopped")
+                
+            except Exception as e:
+                logger.error(f"Error stopping message dispatcher: {str(e)}")
+    
+        def register_handler(
+            self,
+            message_type: str,
+            callback: Callable,
+            priority: MessagePriority = MessagePriority.MEDIUM,
+            requires_response: bool = False,
+            timeout: float = 30.0,
+            cooperative_only: bool = False,
+            max_size: Optional[int] = None,
+            version_requirements: Optional[Set[str]] = None
+        ) -> None:
+            """
+            Register a message handler.
+            
+            Args:
+                message_type: Type of message to handle
+                callback: Handler function
+                priority: Message processing priority
+                requires_response: Whether handler expects a response
+                timeout: Response timeout in seconds
+                cooperative_only: Whether to only accept messages from cooperative peers
+                max_size: Maximum message size in bytes
+                version_requirements: Required protocol versions
+            """
+            self.handlers[message_type] = MessageHandler(
+                callback=callback,
+                priority=priority,
+                requires_response=requires_response,
+                timeout=timeout,
+                cooperative_only=cooperative_only,
+                max_size=max_size,
+                version_requirements=version_requirements
+            )
+    
+        async def dispatch_message(
+            self,
+            message_type: str,
+            payload: Dict[str, Any],
+            routing: Optional[MessageRoute] = None,
+            wait_response: bool = False
+        ) -> Optional[Dict[str, Any]]:
+            """
+            Dispatch a message to the network.
+            
+            Args:
+                message_type: Type of message to send
+                payload: Message payload
+                routing: Optional routing information
+                wait_response: Whether to wait for response
+                
+            Returns:
+                Optional[Dict[str, Any]]: Response payload if wait_response is True
+            """
+            try:
+                message_id = self._generate_message_id(message_type, payload)
+                
+                if routing and routing.local_only:
+                    # Handle message locally
+                    return await self._handle_local_message(
+                        message_type,
+                        message_id,
+                        payload
+                    )
+                
+                # Prepare message for sending
+                message = {
+                    "message_id": message_id,
+                    "message_type": message_type,
+                    "payload": payload,
+                    "timestamp": datetime.now().isoformat(),
+                    "sender": self.config.node_id
+                }
+                
+                if wait_response:
+                    # Create future for response
+                    future = asyncio.Future()
+                    self.pending_responses[message_id] = PendingResponse(
+                        message_id=message_id,
+                        sender=self.config.node_id,
+                        timestamp=datetime.now(),
+                        timeout=30.0,
+                        future=future,
+                        message_type=message_type
+                    )
+                    
+                # Route message
+                success = await self._route_message(message, routing)
+                if not success:
+                    if wait_response:
+                        self.pending_responses[message_id].future.cancel()
+                        del self.pending_responses[message_id]
+                    return None
+                
+                if wait_response:
+                    try:
+                        # Wait for response
+                        response = await asyncio.wait_for(
+                            self.pending_responses[message_id].future,
+                            timeout=30.0
+                        )
+                        return response
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Response timeout for message {message_id}")
+                        self.metrics["responses_timed_out"] += 1
+                        return None
+                    finally:
+                        if message_id in self.pending_responses:
+                            del self.pending_responses[message_id]
+                
+                return None
+                
+            except Exception as e:
+                logger.error(f"Error dispatching message: {str(e)}")
+                return None
+    
+        async def handle_message(
+            self,
+            peer_id: str,
+            message_data: Dict[str, Any]
+        ) -> None:
+            """
+            Handle received message from transport layer.
+            
+            Args:
+                peer_id: ID of sending peer
+                message_data: Received message data
+            """
+            try:
+                # Extract message information
+                message_type = message_data.get("message_type")
+                message_id = message_data.get("message_id")
+                payload = message_data.get("payload")
+                
+                if not all([message_type, message_id, payload]):
+                    logger.error("Invalid message format")
+                    return
+                    
+                # Check rate limits
+                if not self._check_rate_limit(peer_id):
+                    logger.warning(f"Rate limit exceeded for peer {peer_id}")
+                    self.metrics["rate_limit_violations"] += 1
+                    return
+                    
+                # Get handler
+                handler = self.handlers.get(message_type)
+                if not handler:
+                    logger.warning(f"No handler for message type: {message_type}")
+                    return
+                    
+                # Validate message
+                if not await self._validate_message(
+                    message_data,
+                    handler,
+                    peer_id
+                ):
+                    return
+                    
+                # Queue message for processing
+                await self._queue_message(
+                    handler.priority,
+                    peer_id,
+                    message_type,
+                    message_id,
+                    payload
+                )
+                
+            except Exception as e:
+                logger.error(f"Error handling message: {str(e)}")
+    
+        async def _handle_local_message(
+            self,
+            message_type: str,
+            message_id: str,
+            payload: Dict[str, Any]
+        ) -> Optional[Dict[str, Any]]:
+            """Handle message locally without network transmission."""
+            try:
+                handler = self.handlers.get(message_type)
+                if not handler:
+                    logger.warning(f"No handler for local message type: {message_type}")
+                    return None
+                    
+                # Execute handler
+                response = await handler.callback(self.config.node_id, payload)
+                return response
+                
+            except Exception as e:
+                logger.error(f"Error handling local message: {str(e)}")
+                return None
+    
+        async def _route_message(
+            self,
+            message: Dict[str, Any],
+            routing: Optional[MessageRoute]
+        ) -> bool:
+            """Route message according to routing information."""
+            try:
+                if not routing:
+                    # Broadcast to all peers
+                    return await self.transport.broadcast_message(
+                        message["message_type"],
+                        message
+                    )
+                
+                success = True
+                sent_to_peers = set()
+                
+                # Send to target shards
+                if routing.target_shards:
+                    # TODO: Implement shard-based routing
+                    pass
+                
+                # Send to target cooperatives
+                if routing.target_cooperatives:
+                    # TODO: Implement cooperative-based routing
+                    pass
+                
+                # Broadcast if specified
+                if routing.broadcast:
+                    for peer_id in self.transport.get_peer_ids():
+                        if (peer_id not in sent_to_peers and 
+                            peer_id not in routing.exclude_peers):
+                            success &= await self.transport.send_message(
+                                peer_id,
+                                message["message_type"],
+                                message
+                            )
+                            sent_to_peers.add(peer_id)
+                
+                self.metrics["messages_routed"] += len(sent_to_peers)
+                return success
+                
+            except Exception as e:
+                logger.error(f"Error routing message: {str(e)}")
+                return False
+    
+        async def _process_queue(
+            self,
+            queue: asyncio.Queue,
+            priority: str
+        ) -> None:
+            """Process messages from a priority queue."""
+            while self.is_running:
+                try:
+                    # Get message from queue
+                    peer_id, message_type, message_id, payload = await queue.get()
+                    
+                    # Get handler
+                    handler = self.handlers[message_type]
+                    
+                    try:
+                        # Execute handler
+                        response = await handler.callback(peer_id, payload)
+                        
+                        # Handle response if needed
+                        if message_id in self.pending_responses:
+                            pending = self.pending_responses[message_id]
+                            if not pending.future.done():
+                                pending.future.set_result(response)
+                                self.metrics["responses_received"] += 1
+                        
+                        self.metrics["messages_processed"] += 1
+                        
+                    except Exception as e:
+                        logger.error(
+                            f"Error processing {priority} priority message: {str(e)}\n"
+                            f"{''.join(traceback.format_exc())}"
+                        )
+                        self.metrics["messages_dropped"] += 1
+                    
+                    finally:
+                        queue.task_done()
+                        
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Error in {priority} priority queue processing: {str(e)}")
+                    await asyncio.sleep(1)
+    
+        async def _maintenance_loop(self) -> None:
+            """Periodic maintenance tasks."""
+            while self.is_running:
+                try:
+                    current_time = datetime.now()
+                    
+                    # Clean up pending responses
+                    for message_id in list(self.pending_responses.keys()):
+                        pending = self.pending_responses[message_id]
+                        if (current_time - pending.timestamp).total_seconds() > pending.timeout:
+                            if not pending.future.done():
+                                pending.future.cancel()
+                            del self.pending_responses[message_id]
+                            self.metrics["responses_timed_out"] += 1
+                    
+                    # Clean up rate limiting data
+                    window_start = current_time.timestamp() - self.rate_limit_window
+                    for peer_id in list(self.message_timestamps.keys()):
+                        self.message_timestamps[peer_id] = [
+                            ts for ts in self.message_timestamps[peer_id]
+                            if ts.timestamp() > window_start
+                        ]
+                        self.message_counts[peer_id] = len(self.message_timestamps[peer_id])
+                    
+                except Exception as e:
+                    logger.error(f"Error in maintenance loop: {str(e)}")
+                    
+                await asyncio.sleep(1)
+    
+        def _check_rate_limit(self, peer_id: str) -> bool:
+            """Check if peer has exceeded rate limit."""
+            current_time = datetime.now()
+            
+            if peer_id not in self.message_timestamps:
+                self.message_timestamps[peer_id] = []
+                self.message_counts[peer_id] = 0
+                
+            # Add new timestamp
+            self.message_timestamps[peer_id].append(current_time)
+            
+           # Update count
+            window_start = current_time.timestamp() - self.rate_limit_window
+            self.message_counts[peer_id] = sum(
+                1 for ts in self.message_timestamps[peer_id]
+                if ts.timestamp() > window_start
+            )
+            
+            # Check against limit
+            return self.message_counts[peer_id] <= self.rate_limit_max
+    
+        async def _validate_message(
+            self,
+            message_data: Dict[str, Any],
+            handler: MessageHandler,
+            peer_id: str
+        ) -> bool:
+            """
+            Validate incoming message.
+            
+            Args:
+                message_data: Message to validate
+                handler: Handler for this message type
+                peer_id: ID of sending peer
+                
+            Returns:
+                bool: True if message is valid
+            """
+            try:
+                # Check cooperative requirement
+                if handler.cooperative_only:
+                    peer_info = self.transport.get_peer_info(peer_id)
+                    if not peer_info or not peer_info.cooperative_id:
+                        logger.warning(f"Non-cooperative peer {peer_id} sent cooperative-only message")
+                        return False
+                
+                # Check message size
+                if handler.max_size:
+                    message_size = len(json.dumps(message_data))
+                    if message_size > handler.max_size:
+                        logger.warning(f"Message from {peer_id} exceeds size limit")
+                        return False
+                
+                # Check version requirements
+                if handler.version_requirements:
+                    peer_info = self.transport.get_peer_info(peer_id)
+                    if not peer_info:
+                        return False
+                        
+                    peer_versions = peer_info.supported_protocols
+                    if not peer_versions & handler.version_requirements:
+                        logger.warning(f"Peer {peer_id} doesn't support required protocol version")
+                        return False
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error validating message: {str(e)}")
+                return False
+    
+        async def _queue_message(
+            self,
+            priority: MessagePriority,
+            peer_id: str,
+            message_type: str,
+            message_id: str,
+            payload: Dict[str, Any]
+        ) -> None:
+            """Queue message for processing according to priority."""
+            try:
+                message_tuple = (peer_id, message_type, message_id, payload)
+                
+                if priority == MessagePriority.HIGH:
+                    await self.high_priority_queue.put(message_tuple)
+                elif priority == MessagePriority.MEDIUM:
+                    await self.medium_priority_queue.put(message_tuple)
+                else:
+                    await self.low_priority_queue.put(message_tuple)
+                    
+            except Exception as e:
+                logger.error(f"Error queuing message: {str(e)}")
+    
+        def _generate_message_id(self, message_type: str, payload: Dict[str, Any]) -> str:
+            """Generate unique message ID."""
+            data = f"{self.config.node_id}:{message_type}:{json.dumps(payload, sort_keys=True)}"
+            return hashlib.sha256(data.encode()).hexdigest()
+    
+        def get_queue_sizes(self) -> Dict[str, int]:
+            """Get current size of message queues."""
+            return {
+                "high_priority": self.high_priority_queue.qsize(),
+                "medium_priority": self.medium_priority_queue.qsize(),
+                "low_priority": self.low_priority_queue.qsize()
+            }
+    
+        def get_metrics(self) -> Dict[str, int]:
+            """Get dispatcher metrics."""
+            metrics = self.metrics.copy()
+            metrics.update({
+                "pending_responses": len(self.pending_responses),
+                "registered_handlers": len(self.handlers)
+            })
+            return metrics
+    
+    # Example usage
+    async def example_usage():
+        config = NetworkConfig(node_id="test_node")
+        transport = NetworkTransport(config)
+        dispatcher = MessageDispatcher(config, transport)
+        
+        # Register message handler
+        async def handle_test_message(peer_id: str, payload: Dict[str, Any]) -> None:
+            print(f"Received test message from {peer_id}: {payload}")
+            
+        dispatcher.register_handler(
+            "test_message",
+            handle_test_message,
+            priority=MessagePriority.MEDIUM
+        )
+        
+        # Start dispatcher
+        await dispatcher.start()
+        
+        # Dispatch message
+        response = await dispatcher.dispatch_message(
+            "test_message",
+            {"content": "Hello world"},
+            routing=MessageRoute(
+                message_type="test_message",
+                target_shards={1},
+                target_cooperatives={"coop1"},
+                exclude_peers=set(),
+                broadcast=True
+            )
+        )
+        
+        # Stop dispatcher
+        await dispatcher.stop()
+    
+    if __name__ == "__main__":
+        asyncio.run(example_usage())
+```
+
+
+# ============================================================
+# File: /home/matt/icn-prototype/blockchain/network/transport/transport.py
+# Size: 15697 bytes
+# Last Modified: Sat Oct 26 22:32:49 2024
+# Language: py
+# ============================================================
+
+```py
+    # ================================================================
+    # File: blockchain/network/transport/transport.py
+    # Description: Transport layer implementation for ICN network.
+    # Handles low-level network communication, including message framing,
+    # encryption, and reliable delivery.
+    # ================================================================
+    
+    import asyncio
+    import logging
+    import struct
+    import json
+    from typing import Dict, Optional, Tuple, Any, Callable
+    from dataclasses import dataclass
+    from datetime import datetime
+    import hashlib
+    from cryptography.fernet import Fernet
+    from ..config import NetworkConfig
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class MessageFrame:
+        """Represents a framed network message."""
+        message_type: str
+        payload: bytes
+        sequence: int
+        timestamp: datetime
+        flags: int = 0
+        
+        # Message frame format:
+        # | Magic (2) | Version (2) | Flags (2) | Sequence (4) | Length (4) | Type (2) | Payload (...) | CRC (4) |
+        FRAME_MAGIC = 0x1C4E  # ICN in hex
+        FRAME_VERSION = 1
+        HEADER_SIZE = 20
+        
+        def pack(self) -> bytes:
+            """Pack message into bytes for transmission."""
+            try:
+                type_id = hash(self.message_type) & 0xFFFF  # Convert type to 16-bit identifier
+                payload_len = len(self.payload)
+                
+                # Create header
+                header = struct.pack(
+                    ">HHHIH",  # Big-endian: magic, version, flags, sequence, length
+                    self.FRAME_MAGIC,
+                    self.FRAME_VERSION,
+                    self.flags,
+                    self.sequence,
+                    payload_len
+                )
+                
+                # Pack message type
+                header += struct.pack(">H", type_id)
+                
+                # Combine header and payload
+                message = header + self.payload
+                
+                # Add CRC
+                crc = self._calculate_crc(message)
+                message += struct.pack(">I", crc)
+                
+                return message
+                
+            except Exception as e:
+                logger.error(f"Error packing message frame: {str(e)}")
+                raise
+        
+        @classmethod
+        def unpack(cls, data: bytes) -> 'MessageFrame':
+            """Unpack bytes into message frame."""
+            try:
+                # Verify minimum length
+                if len(data) < cls.HEADER_SIZE + 4:  # Header + CRC
+                    raise ValueError("Message too short")
+                    
+                # Parse header
+                magic, version, flags, sequence, payload_len, type_id = struct.unpack(
+                    ">HHHIHH",
+                    data[:cls.HEADER_SIZE]
+                )
+                
+                # Verify magic number and version
+                if magic != cls.FRAME_MAGIC:
+                    raise ValueError("Invalid message magic number")
+                if version != cls.FRAME_VERSION:
+                    raise ValueError("Unsupported message version")
+                    
+                # Extract payload
+                payload_start = cls.HEADER_SIZE
+                payload_end = payload_start + payload_len
+                payload = data[payload_start:payload_end]
+                
+                # Verify payload length
+                if len(payload) != payload_len:
+                    raise ValueError("Incomplete message payload")
+                    
+                # Verify CRC
+                received_crc = struct.unpack(">I", data[payload_end:payload_end + 4])[0]
+                calculated_crc = cls._calculate_crc(data[:payload_end])
+                if received_crc != calculated_crc:
+                    raise ValueError("CRC check failed")
+                    
+                # Reconstruct message type from type_id
+                message_type = f"type_{type_id}"  # TODO: Implement proper type mapping
+                
+                return cls(
+                    message_type=message_type,
+                    payload=payload,
+                    sequence=sequence,
+                    timestamp=datetime.now(),
+                    flags=flags
+                )
+                
+            except Exception as e:
+                logger.error(f"Error unpacking message frame: {str(e)}")
+                raise
+        
+        @staticmethod
+        def _calculate_crc(data: bytes) -> int:
+            """Calculate CRC32 checksum."""
+            return struct.unpack(">I", hashlib.crc32(data).to_bytes(4, 'big'))[0]
+    
+    class SecureChannel:
+        """Handles encrypted communication channel."""
+        
+        def __init__(self, key: Optional[bytes] = None):
+            """Initialize secure channel with optional encryption key."""
+            self.key = key or Fernet.generate_key()
+            self.cipher = Fernet(self.key)
+            
+        def encrypt(self, data: bytes) -> bytes:
+            """Encrypt data."""
+            try:
+                return self.cipher.encrypt(data)
+            except Exception as e:
+                logger.error(f"Encryption error: {str(e)}")
+                raise
+                
+        def decrypt(self, data: bytes) -> bytes:
+            """Decrypt data."""
+            try:
+                return self.cipher.decrypt(data)
+            except Exception as e:
+                logger.error(f"Decryption error: {str(e)}")
+                raise
+    
+    class NetworkTransport:
+        """
+        Handles reliable network transport with message framing and encryption.
+        
+        Features:
+        - Message framing and sequencing
+        - Optional encryption
+        - Flow control
+        - Error detection
+        - Message acknowledgment
+        """
+        
+        def __init__(self, config: NetworkConfig):
+            """Initialize transport layer."""
+            self.config = config
+            self.sequence_counter = 0
+            self.pending_messages: Dict[int, MessageFrame] = {}
+            self.secure_channels: Dict[str, SecureChannel] = {}  # peer_id -> channel
+            self.message_handlers: Dict[str, Callable] = {}
+            self.retransmit_interval = 5.0  # seconds
+            self.max_retransmissions = 3
+            
+            # Performance tracking
+            self.metrics = {
+                "messages_sent": 0,
+                "messages_received": 0,
+                "bytes_sent": 0,
+                "bytes_received": 0,
+                "retransmissions": 0,
+                "failed_deliveries": 0,
+                "encryption_errors": 0
+            }
+        
+        async def send_message(
+            self,
+            peer_id: str,
+            message_type: str,
+            payload: Dict[str, Any],
+            require_ack: bool = True
+        ) -> bool:
+            """
+            Send a message to a peer.
+            
+            Args:
+                peer_id: ID of the peer to send to
+                message_type: Type of message
+                payload: Message payload
+                require_ack: Whether to wait for acknowledgment
+                
+            Returns:
+                bool: True if message sent successfully
+            """
+            try:
+                # Serialize payload
+                payload_bytes = json.dumps(payload).encode()
+                
+                # Create message frame
+                self.sequence_counter += 1
+                frame = MessageFrame(
+                    message_type=message_type,
+                    payload=payload_bytes,
+                    sequence=self.sequence_counter,
+                    timestamp=datetime.now()
+                )
+                
+                # Encrypt if necessary
+                if self.config.enable_encryption and peer_id in self.secure_channels:
+                    channel = self.secure_channels[peer_id]
+                    frame.payload = channel.encrypt(frame.payload)
+                    frame.flags |= 0x0001  # Set encryption flag
+                
+                # Pack frame
+                message_data = frame.pack()
+                
+                # Send message
+                writer = self._get_peer_writer(peer_id)
+                if not writer:
+                    return False
+                    
+                writer.write(message_data)
+                await writer.drain()
+                
+                # Track metrics
+                self.metrics["messages_sent"] += 1
+                self.metrics["bytes_sent"] += len(message_data)
+                
+                # Handle acknowledgment
+                if require_ack:
+                    self.pending_messages[frame.sequence] = frame
+                    acknowledgment = await self._wait_for_ack(frame.sequence)
+                    return acknowledgment
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error sending message to {peer_id}: {str(e)}")
+                return False
+        
+        async def handle_connection(
+            self,
+            peer_id: str,
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter
+        ) -> None:
+            """
+            Handle incoming peer connection.
+            
+            Args:
+                peer_id: ID of the connected peer
+                reader: StreamReader for receiving data
+                writer: StreamWriter for sending data
+            """
+            try:
+                # Initialize encryption if enabled
+                if self.config.enable_encryption:
+                    await self._setup_secure_channel(peer_id, reader, writer)
+                
+                # Start message handling loop
+                while True:
+                    # Read header size
+                    header_data = await reader.readexactly(MessageFrame.HEADER_SIZE)
+                    
+                    # Parse header
+                    magic, version, flags, sequence, payload_len, _ = struct.unpack(
+                        ">HHHIHH",
+                        header_data
+                    )
+                    
+                    # Verify magic number and version
+                    if magic != MessageFrame.FRAME_MAGIC:
+                        logger.error(f"Invalid message magic from {peer_id}")
+                        break
+                        
+                    if version != MessageFrame.FRAME_VERSION:
+                        logger.error(f"Unsupported message version from {peer_id}")
+                        break
+                    
+                    # Read payload and CRC
+                    remaining_data = await reader.readexactly(payload_len + 4)
+                    message_data = header_data + remaining_data
+                    
+                    # Unpack message
+                    message = MessageFrame.unpack(message_data)
+                    
+                    # Decrypt if necessary
+                    if flags & 0x0001 and peer_id in self.secure_channels:
+                        channel = self.secure_channels[peer_id]
+                        message.payload = channel.decrypt(message.payload)
+                    
+                    # Track metrics
+                    self.metrics["messages_received"] += 1
+                    self.metrics["bytes_received"] += len(message_data)
+                    
+                    # Send acknowledgment
+                    await self._send_ack(writer, sequence)
+                    
+                    # Handle message
+                    await self._handle_message(peer_id, message)
+                    
+            except asyncio.IncompleteReadError:
+                logger.info(f"Connection closed by peer {peer_id}")
+            except Exception as e:
+                logger.error(f"Error handling connection from {peer_id}: {str(e)}")
+            finally:
+                writer.close()
+                await writer.wait_closed()
+                if peer_id in self.secure_channels:
+                    del self.secure_channels[peer_id]
+        
+        def register_handler(
+            self,
+            message_type: str,
+            handler: Callable[[str, Dict[str, Any]], None]
+        ) -> None:
+            """
+            Register a message handler.
+            
+            Args:
+                message_type: Type of message to handle
+                handler: Callback function
+            """
+            self.message_handlers[message_type] = handler
+        
+        async def _setup_secure_channel(
+            self,
+            peer_id: str,
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter
+        ) -> None:
+            """Set up encrypted channel with peer."""
+            try:
+                # Exchange keys
+                my_key = Fernet.generate_key()
+                writer.write(my_key)
+                await writer.drain()
+                
+                peer_key = await reader.readexactly(44)  # Fernet key length
+                
+                # Create secure channel
+                channel = SecureChannel(peer_key)
+                self.secure_channels[peer_id] = channel
+                
+            except Exception as e:
+                logger.error(f"Error setting up secure channel with {peer_id}: {str(e)}")
+                self.metrics["encryption_errors"] += 1
+                raise
+        
+        async def _handle_message(self, peer_id: str, message: MessageFrame) -> None:
+            """Handle received message."""
+            try:
+                # Deserialize payload
+                payload = json.loads(message.payload.decode())
+                
+                # Call registered handler
+                handler = self.message_handlers.get(message.message_type)
+                if handler:
+                    await handler(peer_id, payload)
+                else:
+                    logger.warning(f"No handler for message type: {message.message_type}")
+                    
+            except Exception as e:
+                logger.error(f"Error handling message: {str(e)}")
+        
+        async def _send_ack(self, writer: asyncio.StreamWriter, sequence: int) -> None:
+            """Send acknowledgment message."""
+            try:
+                ack = struct.pack(">I", sequence)
+                writer.write(ack)
+                await writer.drain()
+            except Exception as e:
+                logger.error(f"Error sending acknowledgment: {str(e)}")
+        
+        async def _wait_for_ack(self, sequence: int) -> bool:
+            """Wait for message acknowledgment."""
+            try:
+                retries = 0
+                while retries < self.max_retransmissions:
+                    try:
+                        # Wait for acknowledgment
+                        await asyncio.sleep(self.retransmit_interval)
+                        
+                        # Check if message was acknowledged
+                        if sequence not in self.pending_messages:
+                            return True
+                            
+                        # Retransmit if necessary
+                        if retries < self.max_retransmissions - 1:
+                            frame = self.pending_messages[sequence]
+                            message_data = frame.pack()
+                            writer = self._get_peer_writer(frame.peer_id)
+                            if writer:
+                                writer.write(message_data)
+                                await writer.drain()
+                                self.metrics["retransmissions"] += 1
+                        
+                        retries += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Error in acknowledgment wait: {str(e)}")
+                        retries += 1
+                
+                # Message delivery failed
+                if sequence in self.pending_messages:
+                    del self.pending_messages[sequence]
+                self.metrics["failed_deliveries"] += 1
+                return False
+                
+            except Exception as e:
+                logger.error(f"Error waiting for acknowledgment: {str(e)}")
+                return False
+        
+        def _get_peer_writer(self, peer_id: str) -> Optional[asyncio.StreamWriter]:
+            """Get StreamWriter for a peer."""
+            # TODO: Implement peer writer management
+            return None
+        
+        def get_metrics(self) -> Dict[str, int]:
+            """Get transport metrics."""
+            return self.metrics.copy()
+    
+    # Example usage
+    async def example_usage():
+        config = NetworkConfig(node_id="test_node")
+        transport = NetworkTransport(config)
+        
+        # Register message handler
+        async def handle_message(peer_id: str, payload: Dict[str, Any]) -> None:
+            print(f"Received message from {peer_id}: {payload}")
+            
+        transport.register_handler("test_message", handle_message)
+        
+        # Send message
+        success = await transport.send_message(
+            peer_id="peer1",
+            message_type="test_message",
+            payload={"hello": "world"}
+        )
+        print(f"Message sent: {success}")
+    
+    if __name__ == "__main__":
+        asyncio.run(example_usage())
 ```
 
 

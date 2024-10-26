@@ -1,6 +1,15 @@
-# blockchain/consensus/proof_of_cooperation/reputation_manager.py
+"""
+reputation_manager.py
 
-from typing import Dict, List, Optional, Set, Any
+This module manages reputation scoring and calculations for the Proof of Cooperation (PoC) consensus mechanism.
+It handles all aspects of node reputation, including score calculation, decay, validation eligibility, 
+and updates to validation statistics.
+
+Classes:
+    ReputationManager
+"""
+
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import logging
 import math
@@ -12,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ReputationManager:
     """
     Manages reputation scoring and calculations for the consensus mechanism.
-    Handles all aspects of node reputation including score calculation,
+    Handles all aspects of node reputation, including score calculation,
     decay, and validation eligibility.
     """
 
@@ -21,7 +30,7 @@ class ReputationManager:
         Initialize the reputation manager.
 
         Args:
-            config: The consensus configuration parameters
+            config (ConsensusConfig): The consensus configuration parameters.
         """
         self.config = config
         self.node_stats: Dict[str, ValidationStats] = {}
@@ -31,18 +40,20 @@ class ReputationManager:
 
     def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
         """
-        Calculate a node's cooperation score with all factors.
+        Calculate a node's cooperation score, considering various factors like diversity,
+        consistency, performance, shard-specific behavior, and time decay.
 
         Args:
-            node: The node to calculate score for
-            shard_id: Optional shard ID for shard-specific scoring
+            node (Node): The node to calculate the score for.
+            shard_id (Optional[int]): Optional shard ID for shard-specific scoring.
 
         Returns:
-            float: The calculated cooperation score
+            float: The calculated cooperation score, adjusted by multiple factors.
         """
         try:
-            # Check cache first
             cache_key = f"{node.node_id}:{shard_id or 'all'}"
+            
+            # Return cached score if it is still valid
             if cache_key in self.score_cache:
                 cache_time = self.last_score_update.get(cache_key)
                 if cache_time and datetime.now() - cache_time < self.cache_duration:
@@ -54,18 +65,17 @@ class ReputationManager:
                 for category, score in node.reputation_scores.items()
             )
 
-            # Calculate modifying factors
+            # Calculate additional factors
             factors = [
                 self._calculate_diversity_factor(node),
                 self._calculate_consistency_factor(node),
                 self._calculate_performance_factor(node)
             ]
 
-            # Add shard-specific factor if applicable
             if shard_id is not None:
                 factors.append(self._calculate_shard_factor(node, shard_id))
 
-            # Apply all factors
+            # Apply factors to base score
             final_score = base_score
             for factor in factors:
                 final_score *= factor
@@ -74,7 +84,7 @@ class ReputationManager:
             time_factor = self._calculate_time_decay(node)
             final_score *= time_factor
 
-            # Cache result
+            # Cache the calculated score
             self.score_cache[cache_key] = final_score
             self.last_score_update[cache_key] = datetime.now()
 
@@ -86,31 +96,33 @@ class ReputationManager:
 
     def _calculate_diversity_factor(self, node: Node) -> float:
         """
-        Calculate diversity factor based on cooperative interactions.
+        Calculate a diversity factor based on a node's cooperative interactions. 
+        It evaluates the variety of cooperatives the node interacts with, 
+        favoring nodes that engage with diverse cooperatives.
 
         Args:
-            node: The node to calculate factor for
+            node (Node): The node to calculate the diversity factor for.
 
         Returns:
-            float: The calculated diversity factor
+            float: The calculated diversity factor.
         """
         try:
             recent_interactions = node.cooperative_interactions[-100:]
             if not recent_interactions:
                 return 1.0
 
-            # Calculate unique interaction ratio
+            # Calculate the ratio of unique interactions to total interactions
             unique_coops = len(set(recent_interactions))
             total_interactions = len(recent_interactions)
             diversity_score = unique_coops / total_interactions
 
-            # Progressive scaling based on experience
+            # Scale diversity factor based on total interactions
             if total_interactions >= 20:
                 if unique_coops >= 5:
                     return 1.0 + math.log(1 + diversity_score) * 1.5
                 return 1.0 + math.log(1 + diversity_score)
 
-            return max(0.7, diversity_score)  # Minimum baseline for new nodes
+            return max(0.7, diversity_score)  # Minimum baseline for newer nodes
 
         except Exception as e:
             logger.error(f"Error calculating diversity factor: {str(e)}")
@@ -118,13 +130,14 @@ class ReputationManager:
 
     def _calculate_consistency_factor(self, node: Node) -> float:
         """
-        Calculate consistency factor based on validation history.
+        Calculate a consistency factor based on the node's validation history.
+        This factor rewards consistent performance over time.
 
         Args:
-            node: The node to calculate factor for
+            node (Node): The node to calculate the consistency factor for.
 
         Returns:
-            float: The calculated consistency factor
+            float: The calculated consistency factor.
         """
         try:
             if not node.validation_history:
@@ -137,15 +150,15 @@ class ReputationManager:
             )
             success_rate = successful / len(recent_validations)
 
-            # Progressive scaling based on experience
+            # Determine minimum success rate threshold based on experience
             if node.total_validations < 10:
                 min_rate = self.config.validation_thresholds["min_success_rate"] * 0.8
             else:
                 min_rate = self.config.validation_thresholds["min_success_rate"]
 
-            if success_rate > 0.95:  # Exceptional performance
+            if success_rate > 0.95:
                 return 1.8
-            elif success_rate > 0.8:  # Strong performance
+            elif success_rate > 0.8:
                 return 1.5
             elif success_rate > min_rate:
                 return 1.0 + ((success_rate - min_rate) / (1 - min_rate))
@@ -158,20 +171,21 @@ class ReputationManager:
 
     def _calculate_performance_factor(self, node: Node) -> float:
         """
-        Calculate performance factor based on node metrics.
+        Calculate a performance factor based on node metrics such as availability, 
+        validation success rate, and network reliability.
 
         Args:
-            node: The node to calculate factor for
+            node (Node): The node to calculate the performance factor for.
 
         Returns:
-            float: The calculated performance factor
+            float: The calculated performance factor.
         """
         try:
             metrics = node.performance_metrics
             if not metrics:
                 return 1.0
 
-            # Weighted performance metrics
+            # Apply weighted performance metrics
             weights = {
                 "availability": 0.35,
                 "validation_success_rate": 0.35,
@@ -183,7 +197,6 @@ class ReputationManager:
                 for metric, weight in weights.items()
             )
 
-            # Apply bonuses for exceptional performance
             if weighted_sum > 0.95:
                 return weighted_sum * 1.2
             elif weighted_sum > 0.9:
@@ -200,39 +213,34 @@ class ReputationManager:
 
     def _calculate_shard_factor(self, node: Node, shard_id: int) -> float:
         """
-        Calculate shard-specific factor.
+        Calculate a shard-specific factor that rewards experience and performance within a shard.
 
         Args:
-            node: The node to calculate factor for
-            shard_id: The shard ID to calculate factor for
+            node (Node): The node to calculate the shard factor for.
+            shard_id (int): The shard ID to calculate the factor for.
 
         Returns:
-            float: The calculated shard factor
+            float: The calculated shard factor.
         """
         try:
             if shard_id not in node.active_shards:
                 return 0.0
 
-            # Calculate time-based experience
-            time_in_shard = (
-                datetime.now() - node.active_shards[shard_id]
-            ).total_seconds()
+            time_in_shard = (datetime.now() - node.active_shards[shard_id]).total_seconds()
             experience = min(1.0, time_in_shard / (24 * 3600))
 
-            # Get shard-specific success rate
             stats = self.node_stats.get(node.node_id, ValidationStats())
             shard_stats = stats.shard_validations.get(shard_id, {})
-            
+
             if shard_stats:
                 success_rate = (
                     shard_stats.get("successful", 0) /
                     max(1, shard_stats.get("selections", 1))
                 )
             else:
-                success_rate = 1.0  # New to shard
+                success_rate = 1.0
 
-            # Progressive weighting
-            if experience < 0.2:  # New to shard
+            if experience < 0.2:
                 return 0.7 + (0.3 * success_rate)
             else:
                 return 0.4 + (0.3 * experience) + (0.3 * success_rate)
@@ -243,25 +251,24 @@ class ReputationManager:
 
     def _calculate_time_decay(self, node: Node) -> float:
         """
-        Calculate time-based decay factor.
+        Calculate a time-based decay factor that reduces the score of inactive nodes over time.
 
         Args:
-            node: The node to calculate decay for
+            node (Node): The node to calculate the time decay for.
 
         Returns:
-            float: The calculated decay factor
+            float: The calculated time decay factor.
         """
         try:
             stats = self.node_stats.get(node.node_id)
             if not stats or not stats.last_validation:
                 return 1.0
 
-            hours_inactive = (
-                datetime.now() - stats.last_validation
-            ).total_seconds() / 3600
+            hours_inactive = (datetime.now() - stats.last_validation).total_seconds() / 3600
 
             if hours_inactive > 24:
                 return math.exp(-hours_inactive / 24)
+
             return 1.0
 
         except Exception as e:
@@ -270,14 +277,15 @@ class ReputationManager:
 
     def can_validate(self, node: Node, shard_id: Optional[int] = None) -> bool:
         """
-        Check if a node can participate in validation.
+        Determine if a node is eligible to participate in validation, considering reputation,
+        validation history, and specific shard requirements.
 
         Args:
-            node: The node to check
-            shard_id: Optional shard ID for shard-specific validation
+            node (Node): The node to check eligibility for.
+            shard_id (Optional[int]): Optional shard ID for shard-specific validation.
 
         Returns:
-            bool: True if node can validate
+            bool: True if the node is eligible for validation, False otherwise.
         """
         try:
             # Handle new nodes
@@ -289,15 +297,15 @@ class ReputationManager:
                     self.config.validation_thresholds["new_node_reputation_factor"]
                 )
 
-            # Standard checks
+            # Standard validation checks
             if not node.can_validate(shard_id):
                 return False
 
-            # Check reputation requirement
+            # Calculate reputation requirement
             total_reputation = node.get_total_reputation()
             reputation_requirement = self.config.min_reputation
 
-            # Scale requirements with experience
+            # Adjust reputation requirement based on experience
             if node.total_validations > 20:
                 reputation_requirement *= 1.2
             elif node.total_validations > 10:
@@ -311,12 +319,11 @@ class ReputationManager:
             # Check recent performance
             stats = self.node_stats.get(node.node_id, ValidationStats())
             if stats.selections > 0:
-                recent_success = (
-                    stats.successful_validations / stats.selections
-                )
-                if (recent_success < 
-                    self.config.validation_thresholds["min_success_rate"] and
-                    node.total_validations > 10):
+                recent_success_rate = stats.successful_validations / stats.selections
+                if (
+                    recent_success_rate < self.config.validation_thresholds["min_success_rate"] and
+                    node.total_validations > 10
+                ):
                     return False
 
             return True
@@ -327,12 +334,12 @@ class ReputationManager:
 
     def update_stats(self, node_id: str, result: ValidationResult, shard_id: Optional[int] = None) -> None:
         """
-        Update validation statistics for a node.
+        Update validation statistics for a node based on the result of a validation attempt.
 
         Args:
-            node_id: ID of the node
-            result: The validation result
-            shard_id: Optional shard ID where validation occurred
+            node_id (str): ID of the node to update.
+            result (ValidationResult): The validation result.
+            shard_id (Optional[int]): Optional shard ID where validation occurred.
         """
         try:
             if node_id not in self.node_stats:
@@ -365,18 +372,23 @@ class ReputationManager:
 
     def get_node_stats(self, node_id: str) -> Optional[ValidationStats]:
         """
-        Get validation statistics for a node.
+        Retrieve validation statistics for a node.
 
         Args:
-            node_id: ID of the node
+            node_id (str): ID of the node to retrieve statistics for.
 
         Returns:
-            Optional[ValidationStats]: The node's validation stats if found
+            Optional[ValidationStats]: The node's validation stats if found, None otherwise.
         """
         return self.node_stats.get(node_id)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert reputation manager state to dictionary."""
+        """
+        Convert the reputation manager's state to a dictionary for serialization.
+
+        Returns:
+            Dict[str, Any]: Dictionary representation of the reputation manager's state.
+        """
         return {
             "node_stats": {
                 node_id: {
@@ -397,7 +409,16 @@ class ReputationManager:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig) -> 'ReputationManager':
-        """Create reputation manager from dictionary data."""
+        """
+        Create a reputation manager instance from a dictionary of data.
+
+        Args:
+            data (Dict[str, Any]): The dictionary data to initialize from.
+            config (ConsensusConfig): The consensus configuration parameters.
+
+        Returns:
+            ReputationManager: A new instance of ReputationManager.
+        """
         manager = cls(config)
 
         # Restore node stats
@@ -407,13 +428,11 @@ class ReputationManager:
             stats.successful_validations = stats_data["successful_validations"]
             stats.consecutive_failures = stats_data["consecutive_failures"]
             if stats_data["last_validation"]:
-                stats.last_validation = datetime.fromisoformat(
-                    stats_data["last_validation"]
-                )
+                stats.last_validation = datetime.fromisoformat(stats_data["last_validation"])
             stats.shard_validations = stats_data["shard_validations"]
             manager.node_stats[node_id] = stats
 
-        # Restore cache
+        # Restore score cache and update times
         manager.score_cache = data["score_cache"]
         manager.last_score_update = {
             k: datetime.fromisoformat(v)

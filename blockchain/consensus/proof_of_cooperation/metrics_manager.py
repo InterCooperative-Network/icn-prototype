@@ -1,4 +1,12 @@
-# blockchain/consensus/proof_of_cooperation/metrics_manager.py
+"""
+metrics_manager.py
+
+This module manages performance metrics and statistics for the Proof of Cooperation (PoC) consensus mechanism.
+It tracks validation success rates, block times, collusion detections, and other performance indicators.
+
+Classes:
+    MetricsManager
+"""
 
 import logging
 from typing import Dict, Optional, Any
@@ -24,40 +32,24 @@ class MetricsManager:
         Record the result of a validation attempt.
 
         Args:
-            result: The validation result
-            validator_id: ID of the validator
-            shard_id: Optional shard ID where validation occurred
+            result (ValidationResult): The validation result.
+            validator_id (str): ID of the validator.
+            shard_id (Optional[int]): Optional shard ID where validation occurred.
         """
         try:
             self.metrics.total_validations += 1
-            
+
             if result.success:
                 self.metrics.successful_validations += 1
             else:
                 self.metrics.failed_validations += 1
 
             # Track per-validator metrics
-            if validator_id not in self.metrics.validator_counts:
-                self.metrics.validator_counts[validator_id] = 0
-            self.metrics.validator_counts[validator_id] += 1
+            self.metrics.validator_counts[validator_id] = self.metrics.validator_counts.get(validator_id, 0) + 1
 
             # Track shard-specific metrics if applicable
             if shard_id is not None:
-                if shard_id not in self.metrics.shard_metrics:
-                    self.metrics.shard_metrics[shard_id] = {
-                        "validations": 0,
-                        "successful": 0,
-                        "failed": 0,
-                        "unique_validators": set()
-                    }
-                
-                shard_metrics = self.metrics.shard_metrics[shard_id]
-                shard_metrics["validations"] += 1
-                if result.success:
-                    shard_metrics["successful"] += 1
-                else:
-                    shard_metrics["failed"] += 1
-                shard_metrics["unique_validators"].add(validator_id)
+                self._update_shard_metrics(result, validator_id, shard_id)
 
             # Add any custom metrics from the validation result
             self._update_custom_metrics(result.metrics)
@@ -65,17 +57,44 @@ class MetricsManager:
         except Exception as e:
             logger.error(f"Failed to record validation metrics: {str(e)}")
 
+    def _update_shard_metrics(self, result: ValidationResult, validator_id: str, shard_id: int) -> None:
+        """
+        Update shard-specific metrics.
+
+        Args:
+            result (ValidationResult): The validation result.
+            validator_id (str): ID of the validator.
+            shard_id (int): ID of the shard.
+        """
+        if shard_id not in self.metrics.shard_metrics:
+            self.metrics.shard_metrics[shard_id] = {
+                "validations": 0,
+                "successful": 0,
+                "failed": 0,
+                "unique_validators": set()
+            }
+
+        shard_metrics = self.metrics.shard_metrics[shard_id]
+        shard_metrics["validations"] += 1
+
+        if result.success:
+            shard_metrics["successful"] += 1
+        else:
+            shard_metrics["failed"] += 1
+
+        shard_metrics["unique_validators"].add(validator_id)
+
     def record_block_time(self, block_time: float) -> None:
         """
         Record the time taken to create a block.
 
         Args:
-            block_time: Time in seconds to create the block
+            block_time (float): Time in seconds to create the block.
         """
         try:
             current_avg = self.metrics.average_block_time
             total_blocks = self.metrics.total_blocks_validated
-            
+
             # Update running average
             self.metrics.average_block_time = (
                 (current_avg * total_blocks + block_time) / (total_blocks + 1)
@@ -98,10 +117,10 @@ class MetricsManager:
         Get performance metrics for a specific validator.
 
         Args:
-            validator_id: ID of the validator
+            validator_id (str): ID of the validator.
 
         Returns:
-            Dict containing validator's performance metrics
+            Dict[str, Any]: Validator's performance metrics.
         """
         try:
             total_validations = self.metrics.validator_counts.get(validator_id, 0)
@@ -112,19 +131,19 @@ class MetricsManager:
                     "shard_participation": {}
                 }
 
-            # Calculate success rate for this validator
             validator_successes = sum(
-                1 for s in self.metrics.shard_metrics.values()
-                if validator_id in s["unique_validators"] and s["successful"] > 0
+                1 for shard in self.metrics.shard_metrics.values()
+                if validator_id in shard["unique_validators"] and shard["successful"] > 0
             )
             success_rate = validator_successes / total_validations
 
-            # Calculate shard participation
             shard_participation = {
                 shard_id: {
                     "validations": metrics["validations"],
-                    "success_rate": metrics["successful"] / metrics["validations"]
-                    if metrics["validations"] > 0 else 0.0
+                    "success_rate": (
+                        metrics["successful"] / metrics["validations"]
+                        if metrics["validations"] > 0 else 0.0
+                    )
                 }
                 for shard_id, metrics in self.metrics.shard_metrics.items()
                 if validator_id in metrics["unique_validators"]
@@ -145,10 +164,10 @@ class MetricsManager:
         Get metrics for a specific shard.
 
         Args:
-            shard_id: ID of the shard
+            shard_id (int): ID of the shard.
 
         Returns:
-            Dict containing shard metrics
+            Dict[str, Any]: Shard metrics.
         """
         try:
             if shard_id not in self.metrics.shard_metrics:
@@ -162,7 +181,7 @@ class MetricsManager:
 
             metrics = self.metrics.shard_metrics[shard_id]
             total = metrics["validations"]
-            
+
             return {
                 "validations": total,
                 "successful": metrics["successful"],
@@ -180,7 +199,7 @@ class MetricsManager:
         Get all consensus metrics.
 
         Returns:
-            Dict containing all metrics
+            Dict[str, Any]: All metrics.
         """
         try:
             total_validations = self.metrics.total_validations
@@ -189,7 +208,7 @@ class MetricsManager:
                 "successful_validations": self.metrics.successful_validations,
                 "failed_validations": self.metrics.failed_validations,
                 "success_rate": (
-                    self.metrics.successful_validations / total_validations 
+                    self.metrics.successful_validations / total_validations
                     if total_validations > 0 else 0.0
                 ),
                 "average_block_time": self.metrics.average_block_time,
@@ -212,7 +231,7 @@ class MetricsManager:
         Update metrics with custom values from validation results.
 
         Args:
-            custom_metrics: Dictionary of custom metrics to update
+            custom_metrics (Dict[str, Any]): Dictionary of custom metrics to update.
         """
         try:
             for key, value in custom_metrics.items():

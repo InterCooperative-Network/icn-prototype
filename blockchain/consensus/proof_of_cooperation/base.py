@@ -11,7 +11,7 @@ Classes:
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 class BaseValidator(ABC):
     """
@@ -32,9 +32,10 @@ class BaseValidator(ABC):
         """
         self.node_id = node_id
         self.cooperative_id = cooperative_id
-        self.reputation: Dict[str, float] = {}  # Reputation scores across different categories
-        self.performance_metrics: Dict[str, float] = {}  # Track performance (e.g., availability)
-        self.cooldown: int = 0  # Track cooldown period after validation
+        self.reputation: Dict[str, float] = {"validation": 0.0, "cooperation": 0.0}  # Reputation scores
+        self.performance_metrics: Dict[str, Union[float, int]] = {"availability": 0.0, "success_rate": 0.0}
+        self.cooldown: int = 0  # Cooldown period after validation
+        self.inactivity_count: int = 0  # Track validator inactivity
 
     @abstractmethod
     def validate_transaction(self, transaction: Any) -> bool:
@@ -68,11 +69,51 @@ class BaseValidator(ABC):
         """
         self.cooldown = blocks
 
+    def decrease_cooldown(self) -> None:
+        """
+        Decrease the cooldown period by one block.
+        """
+        if self.cooldown > 0:
+            self.cooldown -= 1
+
     def reset_performance_metrics(self) -> None:
         """
         Reset performance metrics to prepare for the next validation cycle.
         """
-        self.performance_metrics.clear()
+        self.performance_metrics = {"availability": 0.0, "success_rate": 0.0}
+
+    def update_reputation(self, category: str, score: float) -> None:
+        """
+        Update the validator's reputation score for a given category.
+
+        Args:
+            category (str): The category of reputation to update (e.g., 'validation', 'cooperation').
+            score (float): The score to add or subtract from the category.
+        """
+        if category in self.reputation:
+            self.reputation[category] += score
+            self.reputation[category] = max(0.0, min(self.reputation[category], 100.0))  # Cap reputation
+
+    def apply_inactivity_decay(self) -> None:
+        """
+        Apply decay to the validator's reputation if it has been inactive for multiple cycles.
+        """
+        if self.inactivity_count > 3:
+            decay_factor = 0.9
+            for category in self.reputation:
+                self.reputation[category] *= decay_factor
+
+    def increment_inactivity(self) -> None:
+        """
+        Increment the inactivity count when the validator fails to participate.
+        """
+        self.inactivity_count += 1
+
+    def reset_inactivity(self) -> None:
+        """
+        Reset the inactivity count when the validator successfully participates.
+        """
+        self.inactivity_count = 0
 
 class BaseReputationSystem(ABC):
     """
@@ -87,11 +128,12 @@ class BaseReputationSystem(ABC):
         self.reputation_scores: Dict[str, float] = {}  # Overall reputation scores for nodes
 
     @abstractmethod
-    def update_reputation(self, category: str, score: float, evidence: Optional[Dict] = None) -> None:
+    def update_reputation(self, node_id: str, category: str, score: float, evidence: Optional[Dict] = None) -> None:
         """
-        Update the reputation score for a specific category.
+        Update the reputation score for a specific category of a node.
 
         Args:
+            node_id (str): Identifier for the node whose reputation is being updated.
             category (str): The category of reputation to update (e.g., 'validation', 'cooperation').
             score (float): The score to add or subtract from the category.
             evidence (Optional[Dict]): Optional evidence to support the reputation change.
@@ -99,17 +141,29 @@ class BaseReputationSystem(ABC):
         pass
 
     @abstractmethod
-    def get_reputation(self, category: str) -> float:
+    def get_reputation(self, node_id: str, category: str) -> float:
         """
-        Get the current reputation score for a specific category.
+        Get the current reputation score for a specific category of a node.
 
         Args:
+            node_id (str): Identifier for the node whose reputation is being retrieved.
             category (str): The category of reputation to retrieve.
 
         Returns:
             float: The reputation score for the specified category.
         """
         pass
+
+    def apply_global_decay(self, decay_rate: float = 0.95) -> None:
+        """
+        Apply global decay to all reputation scores to incentivize continuous participation.
+
+        Args:
+            decay_rate (float): The rate at which reputation decays (default is 0.95).
+        """
+        for node, scores in self.reputation_scores.items():
+            for category in scores:
+                scores[category] *= decay_rate
 
 class BaseTransaction(ABC):
     """
@@ -162,4 +216,10 @@ class BaseTransaction(ABC):
         Returns:
             float: The calculated cooperative score.
         """
-        return self.data.get("cooperative_score", 0)
+        return self.data.get("cooperative_score", 0.0)
+
+    def log_transaction(self) -> None:
+        """
+        Log transaction details for auditing and debugging purposes.
+        """
+        print(f"Transaction from {self.sender} to {self.receiver} | Action: {self.action} | Data: {self.data}")

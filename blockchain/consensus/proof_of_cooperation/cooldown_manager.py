@@ -24,7 +24,7 @@ class CooldownManager:
     - Ensures that validators do not dominate consecutive validation rounds.
     """
     
-    def __init__(self, base_cooldown: int, max_cooldown: int):
+    def __init__(self, base_cooldown: int = 3, max_cooldown: int = 10):
         """
         Initialize the CooldownManager with base and maximum cooldown settings.
 
@@ -148,6 +148,17 @@ class CooldownManager:
         Returns:
             Optional[Node]: The validator node, or None if not found.
         """
-        # This method should interface with a node management system to retrieve nodes
         # Placeholder for integration with the broader PoC network
+        # This method should interface with a node management system to retrieve nodes
         return None  # Replace with actual retrieval logic
+
+    def clear_inactive_validators(self) -> None:
+        """
+        Clear validators from the activity tracker if they have not participated for an extended period.
+
+        This helps manage memory and ensures the activity tracker remains efficient.
+        """
+        current_time = datetime.now()
+        for validator_id, timestamps in list(self.validator_activity.items()):
+            if timestamps and current_time - timestamps[-1] > timedelta(hours=2):
+                del self.validator_activity[validator_id]

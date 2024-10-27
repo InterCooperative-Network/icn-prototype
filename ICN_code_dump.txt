@@ -64,13 +64,14 @@
 # /home/matt/icn-prototype/blockchain/contracts/contract_executor.py - 11587 bytes - Included
 # /home/matt/icn-prototype/blockchain/contracts/smart_contract.py - 14617 bytes - Included
 # /home/matt/icn-prototype/blockchain/contracts/__init__.py - 207 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation.py - 27497 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation.py - 8868 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/__init__.py - 336 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py - 10069 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py - 16196 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py - 7980 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py - 17285 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py - 9018 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/types.py - 11674 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py - 7466 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/sanctions_manager.py - 10255 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py - 8568 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py - 8036 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py - 6715 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/__init__.py - 0 bytes - Included
@@ -104,6 +105,8 @@ icn-prototype/
     api/
         server.py
         __init__.py
+    .vscode/
+        settings.json
     tests/
         __init__.py
         integration/
@@ -186,6 +189,7 @@ icn-prototype/
                 reputation_manager.py
                 validator_manager.py
                 types.py
+                sanctions_manager.py
                 collusion_detector.py
                 base.py
                 cooldown_manager.py
@@ -15414,8 +15418,8 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation.py
-# Size: 27497 bytes
-# Last Modified: Thu Oct 24 23:19:04 2024
+# Size: 8868 bytes
+# Last Modified: Sun Oct 27 00:04:09 2024
 # Language: py
 # ============================================================
 
@@ -15433,8 +15437,12 @@ icn-prototype/
     import math
     import random
     import logging
+    
     from ..core.node import Node
     from ..core.block import Block
+    from .collusion_detector import CollusionDetector
+    from .reputation_manager import ReputationManager
+    from .sanctions_manager import SanctionsManager
     
     logger = logging.getLogger(__name__)
     
@@ -15442,56 +15450,30 @@ icn-prototype/
         """
         Implements the Proof of Cooperation consensus mechanism for the ICN.
     
-        Key improvements:
-        - Progressive reputation requirements for new nodes
-        - Dynamic scoring adjustments
-        - Enhanced collusion detection
-        - Improved validation mechanics
-        - Better shard-specific handling
+        Key Improvements:
+        - Modular integration with collusion detection, reputation, and sanctions management.
+        - Progressive reputation requirements for new nodes.
+        - Dynamic scoring adjustments.
+        - Enhanced validator eligibility checks.
+        - Improved shard-specific handling.
         """
     
-        def __init__(self, min_reputation: float = 10.0, cooldown_blocks: int = 3):
+        def __init__(self, reputation_manager: ReputationManager, collusion_detector: CollusionDetector, sanctions_manager: SanctionsManager, min_reputation: float = 10.0, cooldown_blocks: int = 3):
             """
-            Initialize the Proof of Cooperation mechanism.
-            
-            Parameters:
-            - min_reputation: Minimum reputation required to participate.
-            - cooldown_blocks: Number of blocks for the cooldown period after validation.
+            Initialize the Proof of Cooperation mechanism with external modules.
+    
+            Args:
+                reputation_manager (ReputationManager): Instance for managing reputation.
+                collusion_detector (CollusionDetector): Instance for detecting collusion.
+                sanctions_manager (SanctionsManager): Instance for managing sanctions.
+                min_reputation (float): Minimum reputation required to participate.
+                cooldown_blocks (int): Number of blocks for the cooldown period after validation.
             """
-            # Core parameters
+            self.reputation_manager = reputation_manager
+            self.collusion_detector = collusion_detector
+            self.sanctions_manager = sanctions_manager
             self.min_reputation = min_reputation
             self.cooldown_blocks = cooldown_blocks
-            
-            # Reputation category weights
-            self.reputation_weights = {
-                "cooperative_growth": 1.5,
-                "proposal_participation": 1.2,
-                "transaction_validation": 1.3,  # Increased importance
-                "resource_sharing": 1.3,
-                "conflict_resolution": 1.1,
-                "community_building": 1.2,
-                "sustainability": 1.2,
-                "innovation": 1.3,
-                "network_stability": 1.4,  # Increased importance
-                "data_availability": 1.2,
-            }
-            
-            # Validation thresholds with progressive scaling
-            self.validation_thresholds = {
-                "min_participation": 0.05,    # Lowered initial barrier
-                "min_success_rate": 0.4,      # More forgiving for new nodes
-                "min_availability": 0.6,      # Adjusted for better accessibility
-                "max_consecutive_validations": 3,
-                "new_node_reputation_factor": 0.3,  # More lenient for new nodes
-                "min_interactions": 3,         # Minimum required interactions
-            }
-            
-            # System parameters
-            self.cooperation_scores: Dict[str, float] = {}
-            self.reputation_decay_factor = 0.95  # Slower decay
-            self.collusion_threshold = 0.75
-            self.validator_history: List[Tuple[str, datetime, int]] = []
-            self.validation_stats: Dict[str, Dict[str, Any]] = {}
             
             # Performance tracking
             self.performance_metrics = {
@@ -15506,358 +15488,76 @@ icn-prototype/
     
         def _can_participate(self, node: Node, shard_id: Optional[int] = None) -> bool:
             """
-            Determine if a node can participate in consensus with progressive requirements.
-            
-            Parameters:
-            - node: Node to be checked for participation eligibility.
-            - shard_id: Optional shard ID for shard-specific checks.
-            
+            Determine if a node can participate in consensus with modular validation checks.
+    
+            Args:
+                node (Node): Node to be checked for participation eligibility.
+                shard_id (Optional[int]): Optional shard ID for shard-specific checks.
+    
             Returns:
-            - bool: True if node can participate, False otherwise.
+                bool: True if node can participate, False otherwise.
             """
             try:
-                # Basic validation check
                 if not node.can_validate(shard_id):
                     return False
     
-                # Get base reputation requirement
-                is_new_node = node.total_validations < 10
-                base_requirement = (
-                    self.min_reputation * self.validation_thresholds["new_node_reputation_factor"]
-                    if is_new_node else
-                    self.min_reputation
-                )
-                
-                # Apply progressive scaling based on participation history
-                if node.total_validations > 0:
-                    success_rate = self._calculate_success_rate(node)
-                    if success_rate > 0.8:
-                        base_requirement *= 0.8  # Reward consistent good performance
-                
-                # Check reputation threshold
-                total_reputation = node.get_total_reputation()
-                if total_reputation < base_requirement:
+                # Check if the node is under sanctions
+                sanction_level, status = self.sanctions_manager.get_sanction_status(node)
+                if status == "permanently_excluded":
                     return False
     
-                # Verify shard assignment if specified
-                if shard_id is not None:
-                    if shard_id not in node.active_shards:
-                        return False
-                    # Check shard-specific performance
-                    if not self._check_shard_performance(node, shard_id):
-                        return False
+                # Reputation checks
+                reputation_requirement = self.min_reputation
+                if not self.reputation_manager.can_validate(node, shard_id):
+                    return False
     
-                # Additional checks for established nodes
-                if not is_new_node:
-                    if len(node.cooperative_interactions) < self.validation_thresholds["min_interactions"]:
-                        return False
-                        
+                # Shard-specific checks
+                if shard_id is not None and shard_id not in node.active_shards:
+                    return False
+    
                 return True
     
             except Exception as e:
                 logger.error(f"Error in participation check: {e}")
                 return False
     
-        def _check_shard_performance(self, node: Node, shard_id: int) -> bool:
-            """
-            Verify node's performance in specific shard.
-            
-            Parameters:
-            - node: Node to be checked for shard performance.
-            - shard_id: ID of the shard for performance check.
-            
-            Returns:
-            - bool: True if shard performance is acceptable, False otherwise.
-            """
-            try:
-                stats = self.validation_stats.get(node.node_id, {})
-                shard_stats = stats.get("shard_validations", {}).get(shard_id, {})
-                
-                if not shard_stats:
-                    return True  # New to this shard
-                    
-                selections = shard_stats.get("selections", 0)
-                if selections == 0:
-                    return True
-                    
-                success_rate = shard_stats.get("successful", 0) / max(1, selections)
-                return success_rate >= self.validation_thresholds["min_success_rate"]
-                
-            except Exception as e:
-                logger.error(f"Error checking shard performance: {e}")
-                return True  # Fail open for new nodes
-    
         def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
             """
-            Calculate node's cooperation score with dynamic adjustments.
-            
-            Parameters:
-            - node: Node whose cooperation score is being calculated.
-            - shard_id: Optional shard ID for shard-specific adjustments.
-            
+            Calculate node's cooperation score using reputation manager and collusion detection.
+    
+            Args:
+                node (Node): Node whose cooperation score is being calculated.
+                shard_id (Optional[int]): Optional shard ID for shard-specific adjustments.
+    
             Returns:
-            - float: Calculated cooperation score.
+                float: Calculated cooperation score.
             """
             try:
-                if not self._can_participate(node, shard_id):
-                    return 0.0
-    
-                # Calculate base reputation score
-                base_score = sum(
-                    score * self.reputation_weights.get(category, 1.0)
-                    for category, score in node.reputation_scores.items()
-                )
-    
-                # Calculate and apply modifying factors
-                factors = [
-                    self._calculate_diversity_factor(node),
-                    self._calculate_consistency_factor(node),
-                    self._calculate_performance_factor(node)
-                ]
-                
-                if shard_id is not None:
-                    factors.append(self._calculate_shard_factor(node, shard_id))
-    
-                # Combine all factors
-                final_score = base_score
-                for factor in factors:
-                    final_score *= factor
-    
-                # Apply time decay
-                time_factor = self._calculate_time_decay(node)
-                final_score *= time_factor
-    
-                return max(0.0, final_score)
+                return self.reputation_manager.calculate_cooperation_score(node, shard_id)
     
             except Exception as e:
                 logger.error(f"Error calculating cooperation score: {e}")
                 return 0.0
     
-        def _calculate_diversity_factor(self, node: Node) -> float:
-            """
-            Calculate diversity factor with improved scaling.
-            
-            Parameters:
-            - node: Node whose diversity factor is being calculated.
-            
-            Returns:
-            - float: Calculated diversity factor.
-            """
-            try:
-                recent_interactions = node.cooperative_interactions[-100:]
-                if not recent_interactions:
-                    return 1.0
-    
-                unique_coops = len(set(recent_interactions))
-                total_interactions = len(recent_interactions)
-                
-                # Base diversity score
-                diversity_score = unique_coops / total_interactions
-                
-                # Progressive scaling based on interaction count
-                if total_interactions >= 20:
-                    if unique_coops >= 5:
-                        return 1.0 + math.log(1 + diversity_score) * 1.5
-                    return 1.0 + math.log(1 + diversity_score)
-                
-                return max(0.7, diversity_score)  # Minimum baseline for new nodes
-    
-            except Exception as e:
-                logger.error(f"Error calculating diversity factor: {e}")
-                return 0.7
-    
-        def _calculate_consistency_factor(self, node: Node) -> float:
-            """
-            Calculate consistency factor with adaptive thresholds.
-            
-            Parameters:
-            - node: Node whose consistency factor is being calculated.
-            
-            Returns:
-            - float: Calculated consistency factor.
-            """
-            try:
-                if not node.validation_history:
-                    return 1.0
-    
-                recent_validations = node.validation_history[-50:]
-                successful = sum(1 for v in recent_validations 
-                                 if v.get("evidence", {}).get("success", False))
-                
-                success_rate = successful / len(recent_validations)
-                
-                # Progressive scaling based on experience
-                if node.total_validations < 10:
-                    min_rate = self.validation_thresholds["min_success_rate"] * 0.8
-                else:
-                    min_rate = self.validation_thresholds["min_success_rate"]
-                
-                if success_rate > 0.95:  # Exceptional performance
-                    return 1.8
-                elif success_rate > 0.8:  # Strong performance
-                    return 1.5
-                elif success_rate > min_rate:
-                    return 1.0 + ((success_rate - min_rate) / (1 - min_rate))
-                    
-                return max(0.5, success_rate / min_rate)
-    
-            except Exception as e:
-                logger.error(f"Error calculating consistency factor: {e}")
-                return 0.5
-    
-        def _calculate_performance_factor(self, node: Node) -> float:
-            """
-            Calculate performance factor with weighted metrics.
-            
-            Parameters:
-            - node: Node whose performance factor is being calculated.
-            
-            Returns:
-            - float: Calculated performance factor.
-            """
-            try:
-                metrics = node.performance_metrics
-                if not metrics:
-                    return 1.0
-    
-                # Weighted performance metrics
-                weights = {
-                    "availability": 0.35,
-                    "validation_success_rate": 0.35,
-                    "network_reliability": 0.3
-                }
-                
-                weighted_sum = sum(
-                    (metrics.get(metric, 0) / 100) * weight
-                    for metric, weight in weights.items()
-                )
-                
-                # Apply bonuses for exceptional performance
-                if weighted_sum > 0.95:
-                    return weighted_sum * 1.2
-                elif weighted_sum > 0.9:
-                    return weighted_sum * 1.1
-                    
-                return max(self.validation_thresholds["min_availability"], weighted_sum)
-    
-            except Exception as e:
-                logger.error(f"Error calculating performance factor: {e}")
-                return self.validation_thresholds["min_availability"]
-    
-        def _calculate_shard_factor(self, node: Node, shard_id: int) -> float:
-            """
-            Calculate shard-specific factor with experience weighting.
-            
-            Parameters:
-            - node: Node whose shard factor is being calculated.
-            - shard_id: ID of the shard for factor calculation.
-            
-            Returns:
-            - float: Calculated shard factor.
-            """
-            try:
-                if shard_id not in node.active_shards:
-                    return 0.0
-    
-                # Time-based experience
-                time_in_shard = (datetime.now() - node.active_shards[shard_id]).total_seconds()
-                experience = min(1.0, time_in_shard / (24 * 3600))
-                
-                # Success rate in shard
-                stats = self.validation_stats.get(node.node_id, {})
-                shard_stats = stats.get("shard_validations", {}).get(shard_id, {})
-                
-                if shard_stats:
-                    success_rate = (
-                        shard_stats.get("successful", 0) /
-                        max(1, shard_stats.get("selections", 1))
-                    )
-                else:
-                    success_rate = 1.0  # New to shard
-                
-                # Combine factors with progressive weighting
-                if experience < 0.2:  # New to shard
-                    return 0.7 + (0.3 * success_rate)
-                else:
-                    return 0.4 + (0.3 * experience) + (0.3 * success_rate)
-    
-            except Exception as e:
-                logger.error(f"Error calculating shard factor: {e}")
-                return 0.5
-    
-        def _calculate_time_decay(self, node: Node) -> float:
-            """
-            Calculate time-based decay factor.
-            
-            Parameters:
-            - node: Node whose time decay factor is being calculated.
-            
-            Returns:
-            - float: Calculated time decay factor.
-            """
-            try:
-                last_active = self._get_time_since_last_validation(node)
-                if last_active > timedelta(hours=24):
-                    hours_inactive = last_active.total_seconds() / 3600
-                    return math.exp(-hours_inactive / 24)
-                return 1.0
-            except Exception as e:
-                logger.error(f"Error calculating time decay: {e}")
-                return 1.0
-    
-        def _get_time_since_last_validation(self, node: Node) -> timedelta:
-            """
-            Get time since node's last validation.
-            
-            Parameters:
-            - node: Node to check last validation time.
-            
-            Returns:
-            - timedelta: Time since last validation.
-            """
-            stats = self.validation_stats.get(node.node_id, {})
-            last_validation = stats.get("last_validation")
-            if not last_validation:
-                return timedelta(hours=1)  # Default for new nodes
-            return datetime.now() - last_validation
-    
         def select_validator(self, nodes: List[Node], shard_id: Optional[int] = None) -> Optional[Node]:
             """
-            Select validator using weighted random selection with safeguards.
-            
-            Parameters:
-            - nodes: List of potential validator nodes.
-            - shard_id: Optional shard ID for selection.
-            
+            Select validator using modular checks for eligibility and cooperation score.
+    
+            Args:
+                nodes (List[Node]): List of potential validator nodes.
+                shard_id (Optional[int]): Optional shard ID for selection.
+    
             Returns:
-            - Optional[Node]: Selected validator node, if any.
+                Optional[Node]: Selected validator node, if any.
             """
             try:
-                # Get eligible nodes
-                eligible_nodes = [
-                    node for node in nodes
-                    if self._can_participate(node, shard_id)
-                ]
-    
+                eligible_nodes = [node for node in nodes if self._can_participate(node, shard_id)]
                 if not eligible_nodes:
-                    # Special handling for new network state
-                    new_nodes = [
-                        node for node in nodes
-                        if node.total_validations == 0 and node.cooldown == 0
-                    ]
-                    if new_nodes:
-                        selected = random.choice(new_nodes)
-                        self._record_validator_selection(selected, shard_id)
-                        return selected
                     return None
     
-                # Calculate scores
-                scores = [
-                    self.calculate_cooperation_score(node, shard_id)
-                    for node in eligible_nodes
-                ]
+                # Calculate cooperation scores
+                scores = [self.calculate_cooperation_score(node, shard_id) for node in eligible_nodes]
                 total_score = sum(scores)
-    
                 if total_score <= 0:
                     return None
     
@@ -15873,8 +15573,8 @@ icn-prototype/
                         break
     
                 if selected:
-                    self._record_validator_selection(selected, shard_id)
                     selected.enter_cooldown(self.cooldown_blocks)
+                    logger.info(f"Validator {selected.node_id} selected for shard {shard_id}")
     
                 return selected
     
@@ -15884,37 +15584,34 @@ icn-prototype/
     
         def validate_block(self, block: Block, previous_block: Optional[Block], validator: Node) -> bool:
             """
-            Validate block with comprehensive checks.
-            
-            Parameters:
-            - block: The block to be validated.
-            - previous_block: The previous block in the chain.
-            - validator: The node validating the block.
-            
+            Validate block using reputation, sanctions, and collusion checks.
+    
+            Args:
+                block (Block): The block to be validated.
+                previous_block (Optional[Block]): The previous block in the chain.
+                validator (Node): The node validating the block.
+    
             Returns:
-            - bool: True if the block is valid, False otherwise.
+                bool: True if the block is valid, False otherwise.
             """
             try:
-                # Eligibility check
                 if not self._can_validate_block(validator, block.shard_id):
                     logger.error(f"Validator {validator.node_id} not eligible")
                     return False
     
-                # Block integrity check
                 if not block.validate(previous_block):
                     logger.error(f"Block {block.index} failed validation")
                     self._update_validation_stats(validator, block, False)
                     return False
     
-                # Collusion check
-                if self.detect_collusion(validator, block):
-                    logger.warning(f"Collusion detected in block {block.index}")
+                if self.collusion_detector.detect_collusion(validator, block):
+                    logger.warning(f"Collusion detected in block {block.index} by validator {validator.node_id}")
                     self._update_validation_stats(validator, block, False)
+                    self.sanctions_manager.apply_sanction(validator)
                     return False
     
-                # Success case
                 self._update_validation_stats(validator, block, True)
-                logger.info(f"Block {block.index} validated successfully")
+                logger.info(f"Block {block.index} validated successfully by {validator.node_id}")
                 return True
     
             except Exception as e:
@@ -15924,222 +15621,36 @@ icn-prototype/
     
         def _can_validate_block(self, validator: Node, shard_id: Optional[int]) -> bool:
             """
-            Check if validator can validate a specific block.
-            
-            Parameters:
-            - validator: The node attempting to validate the block.
-            - shard_id: Optional shard ID for validation.
-            
+            Check if validator can validate a block with modular eligibility checks.
+    
+            Args:
+                validator (Node): The node attempting to validate the block.
+                shard_id (Optional[int]): Optional shard ID for validation.
+    
             Returns:
-            - bool: True if the validator can validate, False otherwise.
+                bool: True if the validator can validate, False otherwise.
             """
-            try:
-                # New node allowance
-                if validator.total_validations < 5:
-                    if validator.can_validate(shard_id):
-                        return True
-                    return False
-    
-                # Standard validation checks
-                if not validator.can_validate(shard_id):
-                    return False
-    
-                # Reputation threshold with experience-based scaling
-                total_reputation = validator.get_total_reputation()
-                reputation_requirement = self.min_reputation
-                
-                if validator.total_validations > 20:
-                    # Increase requirements for experienced validators
-                    reputation_requirement *= 1.2
-                elif validator.total_validations > 10:
-                    reputation_requirement *= 1.0
-                else:
-                    # Reduce requirements for newer validators
-                    reputation_requirement *= 0.7
-    
-                if total_reputation < reputation_requirement:
-                    return False
-    
-                # Check recent performance
-                stats = self.validation_stats.get(validator.node_id, {})
-                recent_success = stats.get("successful_validations", 0) / max(1, stats.get("selections", 1))
-                
-                if recent_success < self.validation_thresholds["min_success_rate"]:
-                    if validator.total_validations > 10:  # Only apply to experienced validators
-                        return False
-    
-                return True
-    
-            except Exception as e:
-                logger.error(f"Error checking block validation eligibility: {e}")
-                return False
-    
-        def detect_collusion(self, validator: Node, block: Block) -> bool:
-            """
-            Detect collusion patterns in transactions.
-            
-            Parameters:
-            - validator: The node attempting to validate the block.
-            - block: The block being validated.
-            
-            Returns:
-            - bool: True if collusion is detected, False otherwise.
-            """
-            try:
-                if len(block.transactions) < 3:
-                    return False
-    
-                # Track transaction patterns
-                sender_counts: Dict[str, int] = {}
-                receiver_counts: Dict[str, int] = {}
-                address_interactions: Dict[str, Set[str]] = {}
-                
-                # Analyze transaction patterns
-                total_transactions = len(block.transactions)
-                for tx in block.transactions:
-                    # Update counts
-                    sender_counts[tx.sender] = sender_counts.get(tx.sender, 0) + 1
-                    receiver_counts[tx.receiver] = receiver_counts.get(tx.receiver, 0) + 1
-                    
-                    # Track interactions
-                    if tx.sender not in address_interactions:
-                        address_interactions[tx.sender] = set()
-                    address_interactions[tx.sender].add(tx.receiver)
-    
-                # Calculate concentration metrics
-                max_sender_concentration = max(sender_counts.values()) / total_transactions
-                max_receiver_concentration = max(receiver_counts.values()) / total_transactions
-                
-                # Dynamic threshold based on block size
-                threshold = self.collusion_threshold
-                if total_transactions > 10:
-                    threshold *= 0.9  # Stricter for larger blocks
-                elif total_transactions > 20:
-                    threshold *= 0.85  # Even stricter for very large blocks
-                
-                # Check for suspicious patterns
-                if max_sender_concentration > threshold or max_receiver_concentration > threshold:
-                    logger.warning(
-                        f"High concentration detected - Sender: {max_sender_concentration:.2f}, "
-                        f"Receiver: {max_receiver_concentration:.2f}"
-                    )
-                    return True
-                    
-                # Check for circular transaction patterns
-                for address, interactions in address_interactions.items():
-                    if len(interactions) > 2:  # Only check addresses with multiple interactions
-                        for receiver in interactions:
-                            if receiver in address_interactions and address in address_interactions[receiver]:
-                                logger.warning(f"Circular transaction pattern detected involving {address}")
-                                return True
-    
-                return False
-    
-            except Exception as e:
-                logger.error(f"Error detecting collusion: {e}")
-                return False
+            return self._can_participate(validator, shard_id)
     
         def _update_validation_stats(self, validator: Node, block: Block, success: bool) -> None:
             """
-            Update validation statistics comprehensively.
-            
-            Parameters:
-            - validator: The node that validated the block.
-            - block: The block that was validated.
-            - success: Whether the validation was successful.
+            Update validation statistics for modular tracking.
+    
+            Args:
+                validator (Node): The node that validated the block.
+                block (Block): The block that was validated.
+                success (bool): Whether the validation was successful.
             """
-            try:
-                if validator.node_id not in self.validation_stats:
-                    self.validation_stats[validator.node_id] = {
-                        "selections": 0,
-                        "successful_validations": 0,
-                        "last_validation": None,
-                        "shard_validations": {},
-                        "consecutive_failures": 0
-                    }
-    
-                stats = self.validation_stats[validator.node_id]
-                
-                # Update general stats
-                stats["selections"] += 1
-                if success:
-                    stats["successful_validations"] += 1
-                    stats["consecutive_failures"] = 0
-                else:
-                    stats["consecutive_failures"] += 1
-                    
-                stats["last_validation"] = datetime.now()
-    
-                # Update shard-specific stats
-                if block.shard_id is not None:
-                    shard_stats = stats["shard_validations"].setdefault(
-                        block.shard_id, {
-                            "selections": 0,
-                            "successful": 0,
-                            "last_validation": None,
-                            "failure_count": 0
-                        }
-                    )
-                    shard_stats["selections"] += 1
-                    if success:
-                        shard_stats["successful"] += 1
-                    else:
-                        shard_stats["failure_count"] += 1
-                    shard_stats["last_validation"] = datetime.now()
-    
-                # Update performance metrics
-                self.performance_metrics["total_validations"] += 1
-                if success:
-                    self.performance_metrics["successful_validations"] += 1
-                else:
-                    self.performance_metrics["failed_validations"] += 1
-    
-                # Track new node participation
-                if validator.total_validations < 10:
-                    self.performance_metrics["new_node_participations"] += 1
-    
-            except Exception as e:
-                logger.error(f"Error updating validation stats: {e}")
+            self.reputation_manager.update_stats(validator.node_id, ValidationResult(success), block.shard_id)
     
         def get_metrics(self) -> Dict:
             """
             Get comprehensive consensus metrics.
-            
+    
             Returns:
-            - Dict: A dictionary of consensus metrics.
+                Dict: A dictionary of consensus metrics.
             """
-            try:
-                total_validations = self.performance_metrics["total_validations"]
-                if total_validations > 0:
-                    success_rate = (
-                        self.performance_metrics["successful_validations"] / total_validations
-                    )
-                    avg_score = sum(self.cooperation_scores.values()) / len(self.cooperation_scores) if self.cooperation_scores else 0
-                else:
-                    success_rate = 0
-                    avg_score = 0
-                
-                return {
-                    "active_validators": len(self.validation_stats),
-                    "total_validations": total_validations,
-                    "successful_validations": self.performance_metrics["successful_validations"],
-                    "success_rate": success_rate,
-                    "average_block_time": self.performance_metrics["average_block_time"],
-                    "collusion_detections": self.performance_metrics["collusion_detections"],
-                    "failed_validations": self.performance_metrics["failed_validations"],
-                    "total_blocks_validated": self.performance_metrics["total_blocks_validated"],
-                    "new_node_participations": self.performance_metrics["new_node_participations"],
-                    "average_cooperation_score": avg_score,
-                    "total_active_nodes": len([
-                        node_id for node_id, stats in self.validation_stats.items()
-                        if datetime.now() - stats["last_validation"] < timedelta(hours=24)
-                        if stats["last_validation"]
-                    ])
-                }
-                
-            except Exception as e:
-                logger.error(f"Error getting metrics: {e}")
-                return {}
+            return self.reputation_manager.to_dict()
 ```
 
 
@@ -16449,8 +15960,8 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py
-# Size: 16196 bytes
-# Last Modified: Sat Oct 26 23:39:11 2024
+# Size: 17285 bytes
+# Last Modified: Sun Oct 27 00:01:15 2024
 # Language: py
 # ============================================================
 
@@ -16472,6 +15983,7 @@ icn-prototype/
     import math
     from .types import ConsensusConfig, ValidationResult, ValidationStats
     from ..core.node import Node
+    from .collusion_detector import CollusionDetector
     
     logger = logging.getLogger(__name__)
     
@@ -16479,17 +15991,19 @@ icn-prototype/
         """
         Manages reputation scoring and calculations for the consensus mechanism.
         Handles all aspects of node reputation, including score calculation,
-        decay, and validation eligibility.
+        decay, dynamic adjustments, and validation eligibility.
         """
     
-        def __init__(self, config: ConsensusConfig):
+        def __init__(self, config: ConsensusConfig, collusion_detector: CollusionDetector):
             """
             Initialize the reputation manager.
     
             Args:
                 config (ConsensusConfig): The consensus configuration parameters.
+                collusion_detector (CollusionDetector): Instance of the collusion detector for integration.
             """
             self.config = config
+            self.collusion_detector = collusion_detector
             self.node_stats: Dict[str, ValidationStats] = {}
             self.last_score_update: Dict[str, datetime] = {}
             self.score_cache: Dict[str, float] = {}
@@ -16498,7 +16012,7 @@ icn-prototype/
         def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
             """
             Calculate a node's cooperation score, considering various factors like diversity,
-            consistency, performance, shard-specific behavior, and time decay.
+            consistency, performance, shard-specific behavior, time decay, and collusion risk.
     
             Args:
                 node (Node): The node to calculate the score for.
@@ -16526,7 +16040,8 @@ icn-prototype/
                 factors = [
                     self._calculate_diversity_factor(node),
                     self._calculate_consistency_factor(node),
-                    self._calculate_performance_factor(node)
+                    self._calculate_performance_factor(node),
+                    self._calculate_collusion_factor(node)
                 ]
     
                 if shard_id is not None:
@@ -16551,6 +16066,33 @@ icn-prototype/
                 logger.error(f"Error calculating cooperation score: {str(e)}")
                 return 0.0
     
+        def _calculate_collusion_factor(self, node: Node) -> float:
+            """
+            Calculate a collusion factor that reduces the score of nodes with high collusion risk.
+    
+            Args:
+                node (Node): The node to calculate the collusion factor for.
+    
+            Returns:
+                float: The calculated collusion factor.
+            """
+            try:
+                risk_score = self.collusion_detector._calculate_risk_score(node)
+                
+                # Reduce the factor based on collusion risk
+                if risk_score > 0.9:
+                    return 0.2
+                elif risk_score > 0.7:
+                    return 0.5
+                elif risk_score > 0.5:
+                    return 0.7
+    
+                return 1.0  # No penalty for low-risk nodes
+    
+            except Exception as e:
+                logger.error(f"Error calculating collusion factor: {str(e)}")
+                return 0.5
+    
         def _calculate_diversity_factor(self, node: Node) -> float:
             """
             Calculate a diversity factor based on a node's cooperative interactions. 
@@ -16568,12 +16110,10 @@ icn-prototype/
                 if not recent_interactions:
                     return 1.0
     
-                # Calculate the ratio of unique interactions to total interactions
                 unique_coops = len(set(recent_interactions))
                 total_interactions = len(recent_interactions)
                 diversity_score = unique_coops / total_interactions
     
-                # Scale diversity factor based on total interactions
                 if total_interactions >= 20:
                     if unique_coops >= 5:
                         return 1.0 + math.log(1 + diversity_score) * 1.5
@@ -16607,7 +16147,6 @@ icn-prototype/
                 )
                 success_rate = successful / len(recent_validations)
     
-                # Determine minimum success rate threshold based on experience
                 if node.total_validations < 10:
                     min_rate = self.config.validation_thresholds["min_success_rate"] * 0.8
                 else:
@@ -16642,7 +16181,6 @@ icn-prototype/
                 if not metrics:
                     return 1.0
     
-                # Apply weighted performance metrics
                 weights = {
                     "availability": 0.35,
                     "validation_success_rate": 0.35,
@@ -16865,18 +16403,19 @@ icn-prototype/
             }
     
         @classmethod
-        def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig) -> 'ReputationManager':
+        def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig, collusion_detector: CollusionDetector) -> 'ReputationManager':
             """
             Create a reputation manager instance from a dictionary of data.
     
             Args:
                 data (Dict[str, Any]): The dictionary data to initialize from.
                 config (ConsensusConfig): The consensus configuration parameters.
+                collusion_detector (CollusionDetector): Instance of the collusion detector.
     
             Returns:
                 ReputationManager: A new instance of ReputationManager.
             """
-            manager = cls(config)
+            manager = cls(config, collusion_detector)
     
             # Restore node stats
             for node_id, stats_data in data["node_stats"].items():
@@ -16902,8 +16441,8 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py
-# Size: 7980 bytes
-# Last Modified: Sat Oct 26 23:41:09 2024
+# Size: 9018 bytes
+# Last Modified: Sat Oct 26 23:59:09 2024
 # Language: py
 # ============================================================
 
@@ -16921,6 +16460,7 @@ icn-prototype/
     from typing import List, Optional
     from datetime import datetime, timedelta
     from .types import Node, Shard
+    from .collusion_detector import CollusionDetector
     
     class ValidatorManager:
         """
@@ -16931,18 +16471,21 @@ icn-prototype/
         - Tracking validator states, including reputation, performance, and cooldown periods.
         - Integrating with the shard management system to ensure validator availability per shard.
         - Enforcing reputation requirements and cooldown periods for fair participation.
+        - Coordinating with collusion detection for enhanced security and fairness.
         """
         
-        def __init__(self, min_reputation: float, cooldown_blocks: int):
+        def __init__(self, min_reputation: float, cooldown_blocks: int, collusion_detector: CollusionDetector):
             """
-            Initialize the ValidatorManager with minimum reputation and cooldown settings.
+            Initialize the ValidatorManager with minimum reputation, cooldown settings, and collusion detection.
             
             Args:
                 min_reputation (float): Minimum reputation required for validators.
                 cooldown_blocks (int): Number of blocks a validator must wait after validation.
+                collusion_detector (CollusionDetector): Instance of the collusion detector for integration.
             """
             self.min_reputation = min_reputation
             self.cooldown_blocks = cooldown_blocks
+            self.collusion_detector = collusion_detector
             self.validator_history: List[tuple] = []  # Stores tuples of (validator_id, timestamp, shard_id)
     
         def select_validator(self, nodes: List[Node], shard_id: Optional[int] = None) -> Optional[Node]:
@@ -16954,6 +16497,7 @@ icn-prototype/
             - Node must not be in cooldown.
             - Node must be able to validate the specified shard, if shard_id is provided.
             - Nodes with higher reputation, cooperative interactions, and better performance are prioritized.
+            - Nodes with lower collusion risk are prioritized.
     
             Args:
                 nodes (List[Node]): List of nodes to select from.
@@ -16962,7 +16506,8 @@ icn-prototype/
             Returns:
                 Optional[Node]: The selected validator node, or None if no eligible validator is found.
             """
-            eligible_nodes = [node for node in nodes if self._is_eligible(node, shard_id)]
+            # Filter eligible nodes based on eligibility and collusion risk
+            eligible_nodes = [node for node in nodes if self._is_eligible(node, shard_id) and not self._is_high_risk(node)]
             if not eligible_nodes:
                 return None
     
@@ -16971,8 +16516,7 @@ icn-prototype/
     
             # Select the top candidate
             selected_validator = eligible_nodes[0]
-            selected_validator.enter_cooldown(self.cooldown_blocks)
-            self._track_validator_history(selected_validator, shard_id)
+            self._enforce_validator_selection(selected_validator, shard_id)
             return selected_validator
     
         def _is_eligible(self, node: Node, shard_id: Optional[int]) -> bool:
@@ -16986,19 +16530,24 @@ icn-prototype/
             Returns:
                 bool: True if the node is eligible, False otherwise.
             """
-            # Check if node's reputation meets the minimum requirement
-            if node.reputation < self.min_reputation:
+            if node.reputation < self.min_reputation or node.cooldown > 0:
                 return False
-    
-            # Check if node is in cooldown
-            if node.cooldown > 0:
-                return False
-    
-            # Check if node can validate the specified shard
             if shard_id is not None and not node.can_validate(shard_id):
                 return False
-    
             return True
+    
+        def _is_high_risk(self, node: Node) -> bool:
+            """
+            Check if a node is considered high-risk for collusion based on its risk score from the collusion detector.
+    
+            Args:
+                node (Node): Node to check for collusion risk.
+    
+            Returns:
+                bool: True if the node is high-risk, False otherwise.
+            """
+            risk_score = self.collusion_detector._calculate_risk_score(node)
+            return risk_score > 0.8
     
         def _calculate_priority_score(self, node: Node) -> float:
             """
@@ -17008,6 +16557,7 @@ icn-prototype/
             - Reputation
             - Number of cooperative interactions
             - Performance metrics (e.g., availability, validation success rate)
+            - Inverse collusion risk score
     
             Args:
                 node (Node): Node to calculate the priority score for.
@@ -17016,16 +16566,32 @@ icn-prototype/
                 float: Calculated priority score.
             """
             # Weights for different factors in the priority score calculation
-            reputation_weight = 0.6
+            reputation_weight = 0.5
             interaction_weight = 0.2
             performance_weight = 0.2
+            collusion_weight = 0.1
+    
+            collusion_risk = self.collusion_detector._calculate_risk_score(node)
+            collusion_penalty = (1 - collusion_risk) * collusion_weight
     
             score = (
                 node.reputation * reputation_weight +
                 len(node.cooperative_interactions) * interaction_weight +
-                node.performance_metrics.get('validation_success_rate', 0) * performance_weight
+                node.performance_metrics.get('validation_success_rate', 0) * performance_weight +
+                collusion_penalty
             )
             return score
+    
+        def _enforce_validator_selection(self, node: Node, shard_id: Optional[int]) -> None:
+            """
+            Enforce validator selection, including cooldown, reputation updates, and tracking.
+    
+            Args:
+                node (Node): The selected validator node.
+                shard_id (Optional[int]): The shard ID for which the node was selected as a validator.
+            """
+            node.enter_cooldown(self.cooldown_blocks)
+            self._track_validator_history(node, shard_id)
     
         def _track_validator_history(self, node: Node, shard_id: Optional[int]) -> None:
             """
@@ -17041,28 +16607,6 @@ icn-prototype/
             max_history_length = 1000
             if len(self.validator_history) > max_history_length:
                 self.validator_history.pop(0)
-    
-        def reset_validator(self, node: Node) -> None:
-            """
-            Reset the cooldown and state of a validator node after it completes its cooldown period.
-    
-            Args:
-                node (Node): The validator node to reset.
-            """
-            node.cooldown = 0
-            node.reset_performance_metrics()
-    
-        def get_validator_history(self, limit: int = 100) -> List[tuple]:
-            """
-            Retrieve the recent history of validators, useful for auditing and analysis.
-    
-            Args:
-                limit (int): Maximum number of records to return (default is 100).
-    
-            Returns:
-                List[tuple]: A list of tuples containing validator history records.
-            """
-            return self.validator_history[-limit:]
     
         def update_validator_reputation(self, node: Node, reputation_delta: float) -> None:
             """
@@ -17097,17 +16641,17 @@ icn-prototype/
                 if node.cooldown > 0:
                     node.cooldown -= 1
     
-        def _get_all_nodes(self) -> List[Node]:
+        def get_validator_history(self, limit: int = 100) -> List[tuple]:
             """
-            Placeholder method to retrieve all nodes in the network.
+            Retrieve the recent history of validators, useful for auditing and analysis.
     
-            This method should be replaced with actual logic to fetch nodes from the broader PoC network.
+            Args:
+                limit (int): Maximum number of records to return (default is 100).
     
             Returns:
-                List[Node]: List of all nodes (currently returns an empty list).
+                List[tuple]: A list of tuples containing validator history records.
             """
-            # Replace this placeholder with actual retrieval logic in the PoC network
-            return []
+            return self.validator_history[-limit:]
     
         def get_active_validators(self) -> List[str]:
             """
@@ -17117,6 +16661,17 @@ icn-prototype/
                 List[str]: A list of node IDs representing active validators.
             """
             return [record[0] for record in self.validator_history if record[1] > datetime.now() - timedelta(hours=1)]
+    
+        def _get_all_nodes(self) -> List[Node]:
+            """
+            Placeholder method to retrieve all nodes in the network.
+    
+            This method should be replaced with actual logic to fetch nodes from the broader PoC network.
+    
+            Returns:
+                List[Node]: List of all nodes (currently returns an empty list).
+            """
+            return []
 ```
 
 
@@ -17423,9 +16978,269 @@ icn-prototype/
 
 
 # ============================================================
+# File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/sanctions_manager.py
+# Size: 10255 bytes
+# Last Modified: Sun Oct 27 00:02:44 2024
+# Language: py
+# ============================================================
+
+```py
+    """
+    sanctions_manager.py
+    
+    This module manages sanctions and recovery for validators in the Proof of Cooperation (PoC) consensus mechanism.
+    It handles tiered penalties, escalated sanctions, and reputation recovery, and allows for integration 
+    with governance for handling disputes and appeals.
+    
+    Classes:
+        SanctionsManager
+    """
+    
+    from typing import Dict, List, Optional, Tuple
+    from datetime import datetime, timedelta
+    import logging
+    from .types import Node
+    from .collusion_detector import CollusionDetector
+    from .reputation_manager import ReputationManager
+    
+    logger = logging.getLogger(__name__)
+    
+    class SanctionsManager:
+        """
+        Manages sanctions and recovery for validators within the PoC mechanism.
+        
+        Key Responsibilities:
+        - Enforcing tiered sanctions based on collusion risk and frequency of offenses.
+        - Allowing validators to recover from penalties through positive behavior.
+        - Providing integration points for governance to handle disputes and appeals.
+        """
+    
+        def __init__(self, collusion_detector: CollusionDetector, reputation_manager: ReputationManager, max_sanction_level: int = 3, recovery_period: int = 7):
+            """
+            Initialize the SanctionsManager with collusion detection and reputation management integration.
+    
+            Args:
+                collusion_detector (CollusionDetector): Instance of the collusion detector for integration.
+                reputation_manager (ReputationManager): Instance of the reputation manager for integration.
+                max_sanction_level (int): Maximum level of sanctions before permanent exclusion (default is 3).
+                recovery_period (int): Number of days required for a validator to demonstrate positive behavior for recovery.
+            """
+            self.collusion_detector = collusion_detector
+            self.reputation_manager = reputation_manager
+            self.max_sanction_level = max_sanction_level
+            self.recovery_period = timedelta(days=recovery_period)
+            self.sanctions: Dict[str, int] = {}  # Maps validator IDs to sanction levels
+            self.recovery_timers: Dict[str, datetime] = {}  # Maps validator IDs to recovery start times
+    
+        def apply_sanction(self, node: Node) -> None:
+            """
+            Apply a sanction to a validator based on collusion detection outcomes.
+    
+            Args:
+                node (Node): The validator node to sanction.
+            """
+            validator_id = node.node_id
+    
+            # Increase sanction level for the validator
+            current_sanction_level = self.sanctions.get(validator_id, 0) + 1
+            self.sanctions[validator_id] = min(current_sanction_level, self.max_sanction_level)
+    
+            # Apply reputation slashing based on sanction level
+            reputation_penalty = self._calculate_reputation_penalty(current_sanction_level)
+            self.reputation_manager.update_validator_reputation(node, -reputation_penalty)
+    
+            # Start or reset the recovery timer
+            self.recovery_timers[validator_id] = datetime.now()
+    
+            # Log the sanction
+            logger.info(f"Sanction applied to validator {validator_id}: Level {current_sanction_level}, Reputation penalty: {reputation_penalty}")
+    
+            # If maximum sanction level reached, consider permanent exclusion
+            if current_sanction_level >= self.max_sanction_level:
+                self._handle_permanent_exclusion(node)
+    
+        def _calculate_reputation_penalty(self, sanction_level: int) -> float:
+            """
+            Calculate the reputation penalty based on the current sanction level.
+    
+            Args:
+                sanction_level (int): The level of the sanction.
+    
+            Returns:
+                float: The reputation penalty to apply.
+            """
+            base_penalty = 5.0  # Base penalty for the first level of sanctions
+            penalty_multiplier = 1.5  # Multiplier for each additional level
+            return base_penalty * (penalty_multiplier ** (sanction_level - 1))
+    
+        def _handle_permanent_exclusion(self, node: Node) -> None:
+            """
+            Handle permanent exclusion for a validator that has reached the maximum sanction level.
+    
+            Args:
+                node (Node): The validator node to exclude.
+            """
+            validator_id = node.node_id
+    
+            # Mark the validator as permanently excluded
+            node.metadata["status"] = "permanently_excluded"
+            node.reputation = 0.0  # Set reputation to zero
+            node.cooldown = float('inf')  # Indefinite cooldown
+    
+            # Log the permanent exclusion
+            logger.warning(f"Validator {validator_id} has been permanently excluded from the network.")
+    
+        def evaluate_recovery(self, node: Node) -> bool:
+            """
+            Evaluate if a validator is eligible for recovery based on positive behavior.
+    
+            Args:
+                node (Node): The validator node to evaluate.
+    
+            Returns:
+                bool: True if recovery is successful, False otherwise.
+            """
+            validator_id = node.node_id
+            last_recovery_start = self.recovery_timers.get(validator_id)
+    
+            # Check if the validator has demonstrated positive behavior over the recovery period
+            if last_recovery_start and datetime.now() - last_recovery_start >= self.recovery_period:
+                if self._is_behavior_positive(node):
+                    self._recover_validator(node)
+                    return True
+    
+            return False
+    
+        def _is_behavior_positive(self, node: Node) -> bool:
+            """
+            Check if a validator's recent behavior is positive, warranting recovery.
+    
+            Criteria:
+            - No new collusion detections.
+            - Successful validation rate above the minimum threshold.
+    
+            Args:
+                node (Node): The validator node to check.
+    
+            Returns:
+                bool: True if behavior is positive, False otherwise.
+            """
+            risk_score = self.collusion_detector._calculate_risk_score(node)
+            if risk_score > 0.5:
+                return False  # High collusion risk disqualifies recovery
+    
+            recent_validations = node.validation_history[-50:]
+            successful_validations = sum(1 for v in recent_validations if v.get("evidence", {}).get("success", False))
+            success_rate = successful_validations / len(recent_validations) if recent_validations else 0
+    
+            return success_rate >= self.reputation_manager.config.validation_thresholds["min_success_rate"]
+    
+        def _recover_validator(self, node: Node) -> None:
+            """
+            Recover a validator from sanctions, reducing the sanction level and restoring reputation.
+    
+            Args:
+                node (Node): The validator node to recover.
+            """
+            validator_id = node.node_id
+    
+            # Decrease the sanction level and restore reputation
+            current_sanction_level = self.sanctions.get(validator_id, 0)
+            if current_sanction_level > 0:
+                self.sanctions[validator_id] = current_sanction_level - 1
+    
+            # Restore reputation based on recovery
+            recovery_bonus = self._calculate_recovery_bonus(current_sanction_level)
+            self.reputation_manager.update_validator_reputation(node, recovery_bonus)
+    
+            # Reset recovery timer
+            self.recovery_timers[validator_id] = datetime.now()
+    
+            # Log the recovery
+            logger.info(f"Validator {validator_id} has recovered: Sanction level decreased to {current_sanction_level - 1}, Reputation bonus: {recovery_bonus}")
+    
+        def _calculate_recovery_bonus(self, sanction_level: int) -> float:
+            """
+            Calculate the reputation bonus for recovering from sanctions.
+    
+            Args:
+                sanction_level (int): The level of the sanction being recovered from.
+    
+            Returns:
+                float: The reputation bonus to apply.
+            """
+            base_bonus = 3.0  # Base bonus for the first level of recovery
+            bonus_multiplier = 1.2  # Multiplier for each level of recovery
+            return base_bonus * (bonus_multiplier ** sanction_level)
+    
+        def get_sanction_status(self, node: Node) -> Tuple[int, str]:
+            """
+            Get the current sanction status of a validator, including level and status.
+    
+            Args:
+                node (Node): The validator node to check.
+    
+            Returns:
+                Tuple[int, str]: A tuple containing the sanction level and status.
+            """
+            validator_id = node.node_id
+            sanction_level = self.sanctions.get(validator_id, 0)
+            status = node.metadata.get("status", "active")
+    
+            return sanction_level, status
+    
+        def handle_dispute(self, node: Node) -> None:
+            """
+            Handle disputes regarding sanctions, allowing validators to appeal their penalties 
+            through governance mechanisms.
+    
+            Args:
+                node (Node): The validator node appealing the sanction.
+            """
+            validator_id = node.node_id
+            # Placeholder for governance-based dispute resolution
+            logger.info(f"Validator {validator_id} has initiated a dispute against sanctions.")
+            # Future implementation: Integrate with governance for proposals and voting on appeals
+    
+        def to_dict(self) -> Dict[str, Any]:
+            """
+            Convert the sanctions manager's state to a dictionary for serialization.
+    
+            Returns:
+                Dict[str, Any]: Dictionary representation of the sanctions manager's state.
+            """
+            return {
+                "sanctions": self.sanctions,
+                "recovery_timers": {k: v.isoformat() for k, v in self.recovery_timers.items()}
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict[str, Any], collusion_detector: CollusionDetector, reputation_manager: ReputationManager) -> 'SanctionsManager':
+            """
+            Create a sanctions manager instance from a dictionary of data.
+    
+            Args:
+                data (Dict[str, Any]): The dictionary data to initialize from.
+                collusion_detector (CollusionDetector): Instance of the collusion detector.
+                reputation_manager (ReputationManager): Instance of the reputation manager.
+    
+            Returns:
+                SanctionsManager: A new instance of SanctionsManager.
+            """
+            manager = cls(collusion_detector, reputation_manager)
+    
+            # Restore sanctions and recovery timers
+            manager.sanctions = data.get("sanctions", {})
+            manager.recovery_timers = {k: datetime.fromisoformat(v) for k, v in data.get("recovery_timers", {}).items()}
+    
+            return manager
+```
+
+
+# ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py
-# Size: 7466 bytes
-# Last Modified: Sat Oct 26 23:35:27 2024
+# Size: 8568 bytes
+# Last Modified: Sat Oct 26 23:54:30 2024
 # Language: py
 # ============================================================
 
@@ -17440,9 +17255,13 @@ icn-prototype/
         CollusionDetector
     """
     
-    from typing import List, Dict, Tuple
+    from typing import List, Dict, Tuple, Optional
     from datetime import datetime
     from .types import Node, Transaction, Block
+    import logging
+    
+    # Initialize logging
+    logger = logging.getLogger(__name__)
     
     class CollusionDetector:
         """
@@ -17455,18 +17274,21 @@ icn-prototype/
         - Utilizing historical data to identify anomalous patterns that could indicate fraud.
         """
         
-        def __init__(self, transaction_threshold: int = 10, validator_threshold: int = 3):
+        def __init__(self, transaction_threshold: int = 10, validator_threshold: int = 3, dynamic_threshold: bool = True):
             """
             Initialize the CollusionDetector with detection thresholds.
     
             Args:
                 transaction_threshold (int): Number of similar transactions required to trigger a collusion check.
                 validator_threshold (int): Number of validators interacting repeatedly to trigger a collusion check.
+                dynamic_threshold (bool): If True, thresholds adjust based on network conditions.
             """
             self.transaction_threshold = transaction_threshold
             self.validator_threshold = validator_threshold
+            self.dynamic_threshold = dynamic_threshold
             self.suspicious_transactions: List[Transaction] = []  # Stores potentially collusive transactions
             self.suspicious_validators: Dict[str, int] = {}  # Track suspicious validator behavior
+            self.network_activity: Dict[str, int] = {}  # Track overall network activity for adaptive thresholds
     
         def detect_collusion(self, validator: Node, block: Block) -> bool:
             """
@@ -17484,6 +17306,10 @@ icn-prototype/
             Returns:
                 bool: True if collusion is detected, False otherwise.
             """
+            # Adjust thresholds dynamically based on network activity
+            if self.dynamic_threshold:
+                self._adjust_thresholds()
+    
             # Analyze transaction patterns
             transactions_suspicious = self._check_transaction_patterns(block.transactions)
     
@@ -17496,6 +17322,17 @@ icn-prototype/
                 return True
     
             return False
+    
+        def _adjust_thresholds(self) -> None:
+            """
+            Dynamically adjust detection thresholds based on current network activity.
+            This allows the detection mechanism to scale with network load and complexity.
+            """
+            avg_activity = sum(self.network_activity.values()) / len(self.network_activity) if self.network_activity else 1
+            self.transaction_threshold = max(5, int(avg_activity * 0.1))  # Example logic for scaling threshold
+            self.validator_threshold = max(2, int(avg_activity * 0.05))   # Example logic for scaling threshold
+    
+            logger.debug(f"Dynamic thresholds adjusted: Transaction={self.transaction_threshold}, Validator={self.validator_threshold}")
     
         def _check_transaction_patterns(self, transactions: List[Transaction]) -> bool:
             """
@@ -17511,16 +17348,14 @@ icn-prototype/
             Returns:
                 bool: True if suspicious patterns are found, False otherwise.
             """
-            transaction_count: Dict[Tuple[str, str], int] = {}  # Maps (sender, receiver) pairs to transaction counts
-            
+            transaction_count: Dict[Tuple[str, str], int] = {}
             for tx in transactions:
                 pair = (tx.sender, tx.receiver)
                 transaction_count[pair] = transaction_count.get(pair, 0) + 1
-                
-                # If a pair exceeds the threshold, mark as suspicious
                 if transaction_count[pair] >= self.transaction_threshold:
                     self.suspicious_transactions.append(tx)
-                    return True  # Collusion detected in transaction patterns
+                    logger.warning(f"Suspicious transaction pattern detected between {tx.sender} and {tx.receiver}")
+                    return True
     
             return False
     
@@ -17537,17 +17372,14 @@ icn-prototype/
             Returns:
                 bool: True if suspicious interactions are found, False otherwise.
             """
-            interaction_count: Dict[str, int] = {}  # Maps validator IDs to interaction counts
-            
+            interaction_count: Dict[str, int] = {}
             for interaction in validator.validation_history:
                 interacting_validator = interaction.get("validator_id")
                 if interacting_validator:
                     interaction_count[interacting_validator] = interaction_count.get(interacting_validator, 0) + 1
-    
-                    # If repeated interactions exceed the threshold, mark as suspicious
                     if interaction_count[interacting_validator] >= self.validator_threshold:
-                        return True  # Collusion detected in validator interactions
-    
+                        logger.warning(f"Suspicious validator interaction detected: {validator.node_id} with {interacting_validator}")
+                        return True
             return False
     
         def _mark_validator_as_suspicious(self, validator: Node) -> None:
@@ -17563,8 +17395,8 @@ icn-prototype/
             # Update validator metadata and reputation
             validator.metadata["status"] = "suspicious"
             validator.metadata["last_suspicious_activity"] = datetime.now()
-            validator.reputation -= 5  # Apply a reputation penalty
-            validator.cooldown += 1  # Increase cooldown period for extra precaution
+            validator.reputation = max(0, validator.reputation - 5)
+            validator.cooldown += 1
             
             # Log suspicious activity
             self._log_suspicious_activity(validator)
@@ -17577,8 +17409,8 @@ icn-prototype/
                 validator (Node): The validator marked as suspicious.
             """
             validator_id = validator.node_id
-            print(f"[{datetime.now()}] Suspicious activity detected for validator {validator_id}.")
-            print(f"Reputation reduced to {validator.reputation}, status set to 'suspicious'.")
+            logger.info(f"[{datetime.now()}] Suspicious activity detected for validator {validator_id}.")
+            logger.info(f"Reputation reduced to {validator.reputation}, status set to 'suspicious'.")
     
         def report_suspicious_transactions(self) -> List[Transaction]:
             """
@@ -17606,6 +17438,7 @@ icn-prototype/
             """
             self.suspicious_transactions.clear()
             self.suspicious_validators.clear()
+            logger.info("Suspicion data has been reset.")
 ```
 
 

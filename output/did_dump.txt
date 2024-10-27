@@ -1,0 +1,1385 @@
+# Project Context:
+The InterCooperative Network (ICN) is a decentralized cooperative management system designed to support global governance, privacy-preserving identity, and resource sharing. It uses blockchain technology for consensus and DIDs for secure identities, with modules designed for scalable, democratic interaction. The ICN promotes cooperative-based decision-making, transparent governance, and equitable resource distribution.
+
+# Module: did
+# Purpose: Manages Decentralized Identifiers (DIDs) for secure, privacy-preserving user identities.
+# Vision Alignment: Enables privacy-focused governance and secure user participation, aligning with the ICN's commitment to privacy, identity security, and cooperative integrity.
+# Interaction with Other Modules: Works with 'blockchain' for identity validation and 'api' for authentication.
+
+
+# Code Files for Module: did
+
+
+# File: /home/matt/icn-prototype/did/base_did.py
+
+```py
+    from __future__ import annotations
+    from dataclasses import dataclass, field
+    from typing import List, Dict, Optional, Union
+    import hashlib
+    import logging
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.asymmetric import rsa, padding
+    from cryptography.hazmat.primitives import serialization, hashes
+    
+    # Configure logging for the DID module
+    logger = logging.getLogger('did.base_did')
+    logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed trace logs
+    
+    @dataclass
+    class BaseDID:
+        """
+        Base class for Decentralized Identifiers (DID).
+    
+        This class manages core identity functions within the ICN ecosystem, including:
+        - RSA key generation for secure identity management
+        - Decentralized Identifier (DID) creation
+        - Symmetric encryption for sensitive data
+        - Membership management (cooperatives and communities)
+        - Dual reputation system for economic and civil activities
+        - Role-based access control (RBAC) for permission management
+        """
+        private_key: rsa.RSAPrivateKey = field(init=False)
+        public_key: rsa.RSAPublicKey = field(init=False)
+        cooperative_memberships: List[str] = field(default_factory=list)
+        community_memberships: List[str] = field(default_factory=list)
+        reputation_scores: Dict[str, Dict[str, float]] = field(default_factory=lambda: {"economic": {}, "civil": {}})
+        roles: Dict[str, Dict[str, List[str]]] = field(default_factory=lambda: {"cooperative": {}, "community": {}})
+        metadata: Dict = field(default_factory=dict)
+    
+        def __post_init__(self):
+            """
+            Initialize RSA key pair and symmetric encryption after instance creation.
+            """
+            self.private_key = self._generate_private_key()
+            self.public_key = self.private_key.public_key()
+            self._encryption_key = Fernet.generate_key()
+            self._cipher_suite = Fernet(self._encryption_key)
+            logger.info("Initialized BaseDID with RSA keys and Fernet encryption.")
+    
+        def _generate_private_key(self) -> rsa.RSAPrivateKey:
+            """
+            Generate a new RSA private key for the DID.
+    
+            Returns:
+                rsa.RSAPrivateKey: The generated RSA private key object.
+            """
+            return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    
+        def generate_did(self) -> str:
+            """
+            Generate a Decentralized Identifier (DID) based on the public key's SHA-256 hash.
+    
+            Returns:
+                str: The generated DID string in the format 'did:icn:<16_hex_chars>'.
+            """
+            pub_bytes = self.public_key.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            did = f"did:icn:{hashlib.sha256(pub_bytes).hexdigest()[:16]}"
+            logger.debug(f"Generated DID: {did}")
+            return did
+    
+        # Membership Management
+        def add_membership(self, dao_type: str, dao_id: str) -> None:
+            """
+            Add membership to a specified DAO (cooperative or community).
+    
+            Args:
+                dao_type (str): The type of DAO ('cooperative' or 'community').
+                dao_id (str): The ID of the DAO.
+    
+            Raises:
+                ValueError: If the specified dao_type is invalid.
+            """
+            if dao_type not in ['cooperative', 'community']:
+                logger.warning(f"Invalid DAO type for membership addition: {dao_type}")
+                raise ValueError(f"Invalid DAO type: {dao_type}")
+    
+            membership_list = self.cooperative_memberships if dao_type == 'cooperative' else self.community_memberships
+            if dao_id not in membership_list:
+                membership_list.append(dao_id)
+                logger.info(f"Added {dao_type} membership: {dao_id}")
+    
+        def list_memberships(self, dao_type: Optional[str] = None) -> Union[List[str], Dict[str, List[str]]]:
+            """
+            List memberships for a specific DAO type or both.
+    
+            Args:
+                dao_type (Optional[str]): The type of DAO ('cooperative' or 'community'). Defaults to None.
+    
+            Returns:
+                Union[List[str], Dict[str, List[str]]]: List of memberships or dictionary of both types.
+            """
+            if dao_type == 'cooperative':
+                return self.cooperative_memberships
+            elif dao_type == 'community':
+                return self.community_memberships
+            else:
+                return {
+                    "cooperative": self.cooperative_memberships,
+                    "community": self.community_memberships,
+                }
+    
+        # Reputation Management
+        def update_reputation(self, category: str, score: float, dao_type: str, evidence: Optional[Dict] = None) -> None:
+            """
+            Update the reputation score for a specific category within a DAO type.
+    
+            Args:
+                category (str): The category of reputation to update (e.g., 'trustworthiness').
+                score (float): The reputation score to add.
+                dao_type (str): The type of DAO ('economic' or 'civil').
+                evidence (Optional[Dict]): Additional evidence supporting the reputation change.
+    
+            Raises:
+                ValueError: If the specified dao_type is invalid.
+            """
+            if dao_type not in self.reputation_scores:
+                logger.warning(f"Invalid DAO type for reputation update: {dao_type}")
+                raise ValueError(f"Invalid DAO type: {dao_type}")
+    
+            old_score = self.reputation_scores[dao_type].get(category, 0)
+            new_score = old_score + score
+            self.reputation_scores[dao_type][category] = new_score
+            logger.info(f"{dao_type.capitalize()} reputation updated for '{category}': {new_score}")
+    
+            if evidence:
+                self.metadata.setdefault("reputation_evidence", {})[category] = evidence
+    
+        def get_total_reputation(self, dao_type: str) -> float:
+            """
+            Calculate total reputation for a given DAO type.
+    
+            Args:
+                dao_type (str): The type of DAO ('economic' or 'civil').
+    
+            Returns:
+                float: Total reputation score for the specified DAO type.
+    
+            Raises:
+                ValueError: If the specified dao_type is invalid.
+            """
+            if dao_type not in self.reputation_scores:
+                logger.warning(f"Invalid DAO type for reputation calculation: {dao_type}")
+                raise ValueError(f"Invalid DAO type: {dao_type}")
+    
+            total_reputation = sum(self.reputation_scores.get(dao_type, {}).values())
+            logger.info(f"Total {dao_type} reputation calculated: {total_reputation}")
+            return total_reputation
+    
+        # Role-Based Access Control (RBAC)
+        def add_role(self, role: str, permissions: List[str], dao_type: str) -> None:
+            """
+            Add a role with permissions to a specified DAO type.
+    
+            Args:
+                role (str): The name of the role to add.
+                permissions (List[str]): List of permissions associated with the role.
+                dao_type (str): The type of DAO ('cooperative' or 'community').
+    
+            Raises:
+                ValueError: If the specified dao_type is invalid.
+            """
+            if dao_type not in self.roles:
+                logger.warning(f"Invalid DAO type for role assignment: {dao_type}")
+                raise ValueError(f"Invalid DAO type: {dao_type}")
+    
+            self.roles[dao_type][role] = permissions
+            logger.info(f"Role '{role}' added in {dao_type} with permissions: {permissions}")
+    
+        def has_permission(self, role: str, permission: str, dao_type: str) -> bool:
+            """
+            Check if a role has a specific permission within a DAO type.
+    
+            Args:
+                role (str): The name of the role to check.
+                permission (str): The permission to verify.
+                dao_type (str): The type of DAO ('cooperative' or 'community').
+    
+            Returns:
+                bool: True if the role has the specified permission, False otherwise.
+            """
+            has_perm = permission in self.roles.get(dao_type, {}).get(role, [])
+            logger.debug(f"Permission check for {dao_type} role '{role}' and permission '{permission}': {has_perm}")
+            return has_perm
+```
+
+# File: /home/matt/icn-prototype/did/identity_provider.py
+
+```py
+    # identity_provider.py
+    
+    from abc import ABC, abstractmethod
+    from credential import Credential
+    from typing import Dict
+    
+    class IdentityProvider(ABC):
+        """
+        Abstract base class for identity providers in the ICN.
+        
+        This class defines the interface for issuing and verifying credentials for 
+        cooperatives and communities, along with OAuth-like integration.
+        """
+        
+        @abstractmethod
+        def issue_credential(self, subject: str, claims: Dict, dao_type: str) -> Credential:
+            """
+            Issue a verifiable credential for a cooperative or community.
+    
+            Args:
+            - subject: The subject DID.
+            - claims: Claims related to the credential.
+            - dao_type: 'cooperative' or 'community'.
+    
+            Returns:
+            - Credential: The issued credential.
+            """
+            pass
+    
+        @abstractmethod
+        def verify_credential(self, credential: Credential) -> bool:
+            """
+            Verify the cryptographic proof of a credential.
+    
+            Args:
+            - credential: The credential to verify.
+    
+            Returns:
+            - bool: True if the credential is valid, False otherwise.
+            """
+            pass
+    
+        def request_oauth_credential(self, client_id: str, redirect_uri: str, dao_type: str) -> str:
+            """
+            Implement OAuth-like flow for external applications to request credentials from cooperatives or communities.
+            
+            Args:
+            - client_id: Client ID requesting access.
+            - redirect_uri: Redirect URI after consent.
+            - dao_type: 'cooperative' or 'community'.
+    
+            Returns:
+            - str: Authorization URL for credential request.
+            """
+            return f"https://auth.icn.org/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&dao_type={dao_type}"
+```
+
+# File: /home/matt/icn-prototype/did/token_manager.py
+
+```py
+    # token_manager.py
+    
+    from membership_card import MembershipCard
+    from typing import Dict, Optional, List
+    
+    class TokenManager:
+        """
+        Token Manager for managing cooperative and community tokens within the ICN system.
+        
+        This manager handles the issuance, upgrading, and federation of membership cards, 
+        supporting both cooperative and community memberships. It allows for staking, 
+        federation, and enhanced token management features.
+        
+        Attributes:
+        - tokens: Dictionary mapping member DIDs to their respective membership cards.
+        """
+        
+        def __init__(self):
+            """
+            Initialize the TokenManager with an empty dictionary for tokens.
+            """
+            self.tokens: Dict[str, MembershipCard] = {}
+    
+        def create_membership_card(self, dao_type: str, dao_id: str, member_did: str, metadata: Dict) -> MembershipCard:
+            """
+            Create and issue a new membership card for a cooperative or community member.
+    
+            Args:
+            - dao_type: 'cooperative' or 'community', indicating the type of DAO.
+            - dao_id: The ID of the DAO issuing the card.
+            - member_did: The DID of the member receiving the card.
+            - metadata: Additional metadata related to the membership (e.g., roles, permissions).
+    
+            Returns:
+            - MembershipCard: The newly issued membership card.
+    
+            Raises:
+            - ValueError: If a membership card already exists for the given member DID.
+            """
+            if member_did in self.tokens:
+                raise ValueError(f"Membership card already exists for member DID: {member_did}")
+            
+            card = MembershipCard(dao_id=dao_id, member_did=member_did, metadata=metadata, dao_type=dao_type)
+            self.tokens[member_did] = card
+            return card
+    
+        def upgrade_membership_card(self, member_did: str, upgrades: Dict) -> Optional[MembershipCard]:
+            """
+            Upgrade a membership card with new metadata.
+    
+            Args:
+            - member_did: The DID of the member whose card is being upgraded.
+            - upgrades: New metadata to add to the card (e.g., added roles, permissions).
+    
+            Returns:
+            - MembershipCard | None: The upgraded membership card, or None if not found.
+    
+            Raises:
+            - ValueError: If the membership card has been revoked.
+            """
+            card = self.tokens.get(member_did)
+            if card is None:
+                return None
+            if card.is_revoked:
+                raise ValueError(f"Cannot upgrade revoked membership card for member DID: {member_did}")
+    
+            card.metadata.update(upgrades)
+            return card
+    
+        def revoke_membership_card(self, member_did: str) -> bool:
+            """
+            Revoke a membership card, making it invalid for cooperative or community access.
+    
+            Args:
+            - member_did: The DID of the member whose card is being revoked.
+    
+            Returns:
+            - bool: True if revocation was successful, False if the card was not found or already revoked.
+            """
+            card = self.tokens.get(member_did)
+            if card is None or card.is_revoked:
+                return False
+    
+            card.revoke()
+            return True
+    
+        def federate_membership_card(self, member_did: str, federation_terms: Dict) -> Optional[MembershipCard]:
+            """
+            Federate a membership card with another DAO (cooperative or community).
+    
+            Args:
+            - member_did: The DID of the member whose card is being federated.
+            - federation_terms: Terms of the federation agreement (e.g., sharing resources, joint initiatives).
+    
+            Returns:
+            - MembershipCard | None: The federated membership card, or None if not found.
+            """
+            card = self.tokens.get(member_did)
+            if card is None or card.is_revoked:
+                return None
+    
+            # Add federation terms to the membership card metadata
+            if "federation_terms" not in card.metadata:
+                card.metadata["federation_terms"] = []
+            card.metadata["federation_terms"].append(federation_terms)
+    
+            return card
+    
+        def stake_membership_card(self, member_did: str, duration: int) -> bool:
+            """
+            Stake a membership card for cooperative or community rewards.
+    
+            Args:
+            - member_did: The DID of the member staking the card.
+            - duration: Duration of staking in days.
+    
+            Returns:
+            - bool: True if staking was successful, False otherwise.
+            """
+            card = self.tokens.get(member_did)
+            if card and not card.is_revoked:
+                card.metadata["staked"] = True
+                card.metadata["staking_duration"] = duration
+                return True
+            return False
+    
+        def unstake_membership_card(self, member_did: str) -> bool:
+            """
+            Unstake a previously staked membership card, making it active again.
+    
+            Args:
+            - member_did: The DID of the member unstaking the card.
+    
+            Returns:
+            - bool: True if unstaking was successful, False otherwise.
+            """
+            card = self.tokens.get(member_did)
+            if card and card.metadata.get("staked"):
+                card.metadata["staked"] = False
+                del card.metadata["staking_duration"]
+                return True
+            return False
+    
+        def list_membership_cards(self, dao_type: Optional[str] = None) -> Dict[str, MembershipCard]:
+            """
+            List all membership cards, optionally filtered by DAO type.
+    
+            Args:
+            - dao_type: Optional, 'cooperative' or 'community', to filter by type.
+    
+            Returns:
+            - Dict[str, MembershipCard]: Dictionary of membership cards filtered by DAO type, if specified.
+            """
+            if dao_type:
+                return {did: card for did, card in self.tokens.items() if card.dao_type == dao_type}
+            return self.tokens
+    
+        def get_membership_card(self, member_did: str) -> Optional[MembershipCard]:
+            """
+            Retrieve a specific membership card by member DID.
+    
+            Args:
+            - member_did: The DID of the member whose card is being retrieved.
+    
+            Returns:
+            - MembershipCard | None: The membership card if found, otherwise None.
+            """
+            return self.tokens.get(member_did)
+    
+        def transfer_membership(self, from_did: str, to_did: str, dao_type: str, dao_id: str) -> bool:
+            """
+            Transfer a membership from one DID to another within a specific DAO.
+    
+            Args:
+            - from_did: The DID of the member transferring the membership.
+            - to_did: The DID of the recipient member.
+            - dao_type: 'cooperative' or 'community'.
+            - dao_id: The ID of the DAO where the membership is being transferred.
+    
+            Returns:
+            - bool: True if transfer was successful, False otherwise.
+    
+            Raises:
+            - ValueError: If the source DID has no valid membership or the membership is revoked.
+            """
+            card = self.tokens.get(from_did)
+            if card is None or card.is_revoked or card.dao_id != dao_id or card.dao_type != dao_type:
+                raise ValueError(f"No valid membership found for transfer from DID: {from_did}")
+    
+            # Create a new membership card for the recipient DID
+            new_card = MembershipCard(
+                dao_id=dao_id,
+                member_did=to_did,
+                metadata=card.metadata,
+                dao_type=dao_type
+            )
+            self.tokens[to_did] = new_card
+            del self.tokens[from_did]  # Remove the old card after transfer
+    
+            return True
+```
+
+# File: /home/matt/icn-prototype/did/credential.py
+
+```py
+    from dataclasses import dataclass, field
+    from typing import Dict, Optional, List, Union
+    from datetime import datetime, timedelta
+    import hashlib
+    import logging
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
+    from cryptography.hazmat.primitives import hashes, serialization
+    
+    # Configure logging for the credential module
+    logger = logging.getLogger('did.credential')
+    logger.setLevel(logging.DEBUG)
+    
+    @dataclass
+    class Credential:
+        """
+        Verifiable credential for the ICN system.
+    
+        This credential represents a piece of verifiable data about a subject, issued by a cooperative or community DAO.
+        It supports privacy-preserving selective disclosure, cryptographic verification, and expiration management.
+    
+        Attributes:
+            - issuer (str): The DID of the entity issuing the credential.
+            - subject (str): The DID of the entity holding the credential.
+            - claims (Dict): Claims related to the credential (e.g., economic or civil claims).
+            - dao_type (str): The type of DAO ('cooperative' or 'community').
+            - issued_at (datetime): Timestamp of when the credential was issued.
+            - expires_at (Optional[datetime]): Expiration timestamp of the credential.
+            - proof (Optional[Dict]): Cryptographic proof of the credential's validity.
+        """
+        issuer: str
+        subject: str
+        claims: Dict[str, Union[str, int, float]]
+        dao_type: str
+        issued_at: datetime = field(default_factory=datetime.now)
+        expires_at: Optional[datetime] = None
+        proof: Optional[Dict] = None
+    
+        def verify(self, public_key: rsa.RSAPublicKey) -> bool:
+            """
+            Verify the cryptographic proof of the credential using the issuer's public key.
+    
+            Args:
+                public_key (rsa.RSAPublicKey): The RSA public key of the issuer.
+    
+            Returns:
+                bool: True if the credential's proof is valid, False otherwise.
+            """
+            if not self.proof or 'signature' not in self.proof or 'data_hash' not in self.proof:
+                logger.warning("Credential verification failed: Incomplete proof data.")
+                return False
+    
+            try:
+                # Recalculate the hash of the claims data
+                claims_data = self._serialize_claims()
+                data_hash = hashlib.sha256(claims_data.encode('utf-8')).hexdigest()
+    
+                # Check if the hash matches the provided data hash in the proof
+                if data_hash != self.proof['data_hash']:
+                    logger.warning("Data hash mismatch during credential verification.")
+                    return False
+    
+                # Verify the signature using RSA-PSS
+                public_key.verify(
+                    bytes.fromhex(self.proof['signature']),
+                    data_hash.encode('utf-8'),
+                    padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+                    hashes.SHA256()
+                )
+                logger.info("Credential verification successful.")
+                return True
+            except Exception as e:
+                logger.error(f"Error during credential verification: {e}")
+                return False
+    
+        def _serialize_claims(self) -> str:
+            """
+            Serialize the claims dictionary for hashing and signature.
+    
+            Returns:
+                str: Serialized string representation of the claims.
+            """
+            return "|".join(f"{k}:{v}" for k, v in sorted(self.claims.items()))
+    
+        def generate_proof(self, private_key: rsa.RSAPrivateKey) -> None:
+            """
+            Generate a cryptographic proof for the credential using the issuer's private key.
+    
+            Args:
+                private_key (rsa.RSAPrivateKey): The RSA private key of the issuer.
+            """
+            claims_data = self._serialize_claims()
+            data_hash = hashlib.sha256(claims_data.encode('utf-8')).hexdigest()
+    
+            # Sign the data hash using RSA-PSS
+            signature = private_key.sign(
+                data_hash.encode('utf-8'),
+                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+                hashes.SHA256()
+            )
+    
+            self.proof = {
+                'data_hash': data_hash,
+                'signature': signature.hex()
+            }
+            logger.info("Generated cryptographic proof for the credential.")
+    
+        def revoke(self) -> None:
+            """
+            Revoke the credential by setting its expiration to the current time.
+            """
+            self.expires_at = datetime.now()
+            logger.info(f"Credential revoked for subject: {self.subject}")
+    
+        def is_expired(self) -> bool:
+            """
+            Check if the credential is expired.
+    
+            Returns:
+                bool: True if the credential is expired, False otherwise.
+            """
+            if self.expires_at and datetime.now() > self.expires_at:
+                logger.debug("Credential is expired.")
+                return True
+            logger.debug("Credential is not expired.")
+            return False
+    
+        def selective_disclosure(self, fields: List[str]) -> Dict[str, Union[str, int, float]]:
+            """
+            Selectively disclose specified fields of the credential.
+    
+            Args:
+                fields (List[str]): List of fields to disclose.
+    
+            Returns:
+                Dict[str, Union[str, int, float]]: Disclosed claims of the credential.
+            """
+            disclosed_fields = {field: self.claims[field] for field in fields if field in self.claims}
+            logger.debug(f"Selective disclosure of fields: {disclosed_fields}")
+            return disclosed_fields
+    
+    
+    class CredentialTemplate:
+        """
+        Template for creating standard credentials within cooperatives and communities.
+    
+        Attributes:
+            - template_name (str): Name of the credential template.
+            - claims (Dict): Predefined claims for the credential.
+            - dao_type (str): Type of DAO ('cooperative' or 'community').
+        """
+        def __init__(self, template_name: str, claims: Dict[str, Union[str, int, float]], dao_type: str):
+            self.template_name = template_name
+            self.claims = claims
+            self.dao_type = dao_type
+            logger.info(f"Initialized CredentialTemplate: {template_name}")
+    
+        def apply_template(self, subject_did: str, issuer_did: str, private_key: rsa.RSAPrivateKey) -> Credential:
+            """
+            Create a credential based on the template and sign it with the issuer's private key.
+    
+            Args:
+                subject_did (str): The DID of the subject receiving the credential.
+                issuer_did (str): The DID of the issuer.
+                private_key (rsa.RSAPrivateKey): The private key of the issuer for signing.
+    
+            Returns:
+                Credential: The newly created and signed credential.
+            """
+            credential = Credential(
+                issuer=issuer_did,
+                subject=subject_did,
+                claims=self.claims,
+                dao_type=self.dao_type,
+                expires_at=datetime.now() + timedelta(days=365)  # Default expiration: 1 year
+            )
+            credential.generate_proof(private_key)
+            logger.info(f"Credential created using template: {self.template_name}")
+            return credential
+```
+
+# File: /home/matt/icn-prototype/did/did.py
+
+```py
+    from __future__ import annotations
+    from dataclasses import dataclass, field
+    from typing import Dict, List, Optional, Union
+    import logging
+    from datetime import datetime
+    import hashlib
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa, padding
+    from abc import ABC, abstractmethod
+    
+    # Configure logging for the DID module
+    logging.basicConfig(level=logging.DEBUG)
+    logger = logging.getLogger('did.did')
+    
+    
+    @dataclass
+    class Credential:
+        """
+        Verifiable credential for the ICN system, representing claims about a subject.
+        
+        Attributes:
+            - issuer: The DID of the entity issuing the credential.
+            - subject: The DID of the entity holding the credential.
+            - claims: Claims related to the credential.
+            - issued_at: Timestamp of when the credential was issued.
+            - expires_at: Expiration timestamp of the credential.
+            - proof: Cryptographic proof of the credential's validity.
+        """
+        issuer: str
+        subject: str
+        claims: Dict[str, Union[str, int, float]]
+        issued_at: datetime = field(default_factory=datetime.now)
+        expires_at: Optional[datetime] = None
+        proof: Optional[Dict] = None
+    
+        def verify(self) -> bool:
+            """
+            Verify the cryptographic proof of the credential.
+            
+            Returns:
+                bool: True if the credential's proof is valid, False otherwise.
+            """
+            if not self.proof:
+                logger.warning("Credential verification failed: No proof provided.")
+                return False
+    
+            # Placeholder for cryptographic verification logic
+            logger.debug("Credential verification successful.")
+            return True
+    
+        def revoke(self) -> None:
+            """
+            Revoke the credential by setting its expiration date to the current time.
+            """
+            self.expires_at = datetime.now()
+            logger.info(f"Credential revoked for subject: {self.subject}")
+    
+        def is_expired(self) -> bool:
+            """
+            Check if the credential is expired.
+            
+            Returns:
+                bool: True if the credential is expired, False otherwise.
+            """
+            if self.expires_at and datetime.now() > self.expires_at:
+                logger.debug(f"Credential for {self.subject} has expired.")
+                return True
+            return False
+    
+    
+    class IdentityProvider(ABC):
+        """
+        Abstract base class for identity providers, facilitating DID credential issuance and verification.
+        """
+        
+        @abstractmethod
+        def issue_credential(self, subject: str, claims: Dict) -> Credential:
+            """
+            Issue a new credential for a subject.
+    
+            Args:
+                subject: The DID of the subject receiving the credential.
+                claims: Claims associated with the credential.
+    
+            Returns:
+                Credential: The issued credential.
+            """
+            pass
+    
+        @abstractmethod
+        def verify_credential(self, credential: Credential) -> bool:
+            """
+            Verify the cryptographic proof of a credential.
+    
+            Args:
+                credential: The credential to verify.
+    
+            Returns:
+                bool: True if the credential is valid, False otherwise.
+            """
+            pass
+    
+    
+    class DID:
+        """
+        Implementation of Decentralized Identifiers (DID) for the ICN system.
+        
+        Attributes:
+            - cooperative_memberships: List of cooperative memberships.
+            - reputation_scores: Dictionary of reputation scores.
+            - credentials: List of verifiable credentials.
+            - metadata: Metadata associated with the DID.
+        """
+        
+        def __init__(self, cooperative_id: Optional[str] = None):
+            self._private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            self._public_key = self._private_key.public_key()
+            self.cooperative_memberships: List[str] = []
+            self.reputation_scores: Dict[str, float] = {}
+            self.credentials: List[Credential] = []
+            self.metadata: Dict = {}
+    
+            if cooperative_id:
+                self.add_cooperative_membership(cooperative_id)
+    
+            # Create Fernet encryption key for sensitive data
+            self._encryption_key = Fernet.generate_key()
+            self._cipher_suite = Fernet(self._encryption_key)
+            logger.info("Initialized DID with RSA keys and Fernet encryption.")
+    
+        def generate_did(self) -> str:
+            """
+            Generate a DID string based on the SHA-256 hash of the public key.
+            
+            Returns:
+                str: The generated DID string in the format 'did:icn:<16_hex_chars>'.
+            """
+            pub_bytes = self._public_key.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            did = f"did:icn:{hashlib.sha256(pub_bytes).hexdigest()[:16]}"
+            logger.debug(f"Generated DID: {did}")
+            return did
+    
+        def encrypt_data(self, data: str) -> bytes:
+            """
+            Encrypt data using RSA public key encryption.
+    
+            Args:
+                data: The plaintext data to encrypt.
+    
+            Returns:
+                bytes: The encrypted data.
+            """
+            if not isinstance(data, str):
+                logger.error("Data encryption failed: Input data must be a string.")
+                raise TypeError("Input data must be a string.")
+            
+            try:
+                encrypted_data = self._public_key.encrypt(
+                    data.encode(),
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None,
+                    ),
+                )
+                logger.debug("Data encrypted successfully.")
+                return encrypted_data
+            except Exception as e:
+                logger.error(f"Data encryption failed: {e}")
+                raise
+    
+        def decrypt_data(self, encrypted_data: bytes) -> str:
+            """
+            Decrypt data using RSA private key decryption.
+    
+            Args:
+                encrypted_data: The encrypted data to decrypt.
+    
+            Returns:
+                str: The decrypted plaintext data.
+            """
+            try:
+                decrypted = self._private_key.decrypt(
+                    encrypted_data,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None,
+                    ),
+                )
+                logger.debug("Data decrypted successfully.")
+                return decrypted.decode()
+            except Exception as e:
+                logger.error(f"Data decryption failed: {e}")
+                raise
+    
+        def add_cooperative_membership(self, cooperative_id: str) -> None:
+            """
+            Add a cooperative membership to the DID.
+    
+            Args:
+                cooperative_id: The ID of the cooperative to add.
+            """
+            if cooperative_id not in self.cooperative_memberships:
+                self.cooperative_memberships.append(cooperative_id)
+                logger.info(f"Added membership to cooperative: {cooperative_id}")
+    
+        def update_reputation(self, category: str, score: float, evidence: Optional[Dict] = None) -> None:
+            """
+            Update reputation score for a specific category.
+    
+            Args:
+                category: The reputation category to update.
+                score: The reputation score to add.
+                evidence: Additional evidence supporting the reputation change.
+            """
+            if score < 0:
+                logger.warning(f"Attempted negative reputation score update: {score}")
+    
+            self.reputation_scores[category] = self.reputation_scores.get(category, 0) + score
+    
+            if evidence:
+                self.metadata.setdefault("reputation_evidence", {})[category] = evidence
+    
+            logger.info(f"Updated reputation for {category}: {self.reputation_scores[category]}")
+    
+        def get_total_reputation(self) -> float:
+            """
+            Calculate the total reputation across all categories.
+            
+            Returns:
+                float: The total reputation score.
+            """
+            total_reputation = sum(self.reputation_scores.values())
+            logger.debug(f"Total reputation calculated: {total_reputation}")
+            return total_reputation
+    
+        def export_public_credentials(self) -> Dict:
+            """
+            Export public credentials and cooperative memberships.
+            
+            Returns:
+                Dict: Dictionary containing the DID, cooperative memberships, reputation scores, and public credentials.
+            """
+            public_data = {
+                "did": self.generate_did(),
+                "cooperative_memberships": self.cooperative_memberships,
+                "reputation_scores": self.reputation_scores,
+                "public_credentials": [
+                    {k: v for k, v in c.__dict__.items() if k != "proof"}
+                    for c in self.credentials
+                ],
+            }
+            logger.debug(f"Exported public credentials: {public_data}")
+            return public_data
+```
+
+# File: /home/matt/icn-prototype/did/privacy.py
+
+```py
+    # privacy.py
+    
+    from typing import List
+    from base_did import BaseDID
+    
+    class Privacy:
+        """
+        Privacy-preserving techniques for cooperatives and communities in ICN.
+        
+        This module handles privacy-preserving features, including stealth addresses,
+        selective credential disclosure, and zero-knowledge proofs.
+        """
+        
+        def generate_stealth_address(self, did: BaseDID, dao_type: str) -> str:
+            """
+            Generate a stealth address for interactions with a cooperative or community.
+    
+            Args:
+            - did: The DID generating the stealth address.
+            - dao_type: 'cooperative' or 'community'.
+    
+            Returns:
+            - str: The generated stealth address.
+            """
+            stealth_address = f"stealth:{did.generate_did()}:{dao_type}"
+            return stealth_address
+    
+        def verify_zero_knowledge_proof(self, proof_data: bytes, dao_type: str) -> bool:
+            """
+            Verify a zero-knowledge proof for a cooperative or community interaction.
+    
+            Args:
+            - proof_data: The zk-SNARK proof data.
+            - dao_type: 'cooperative' or 'community'.
+    
+            Returns:
+            - bool: True if the proof is valid, False otherwise.
+            """
+            # Placeholder for zk-SNARK verification logic specific to DAO type
+            return True
+    
+        def selective_disclosure(self, did: BaseDID, dao_type: str, fields: List[str]) -> Dict:
+            """
+            Selectively disclose specific information for cooperatives or communities.
+    
+            Args:
+            - did: The DID requesting selective disclosure.
+            - dao_type: 'cooperative' or 'community'.
+            - fields: Fields to disclose.
+    
+            Returns:
+            - Dict: The disclosed information.
+            """
+            data_to_disclose = did.export_public_credentials().get(dao_type, {})
+            return {field: data_to_disclose.get(field) for field in fields}
+```
+
+# File: /home/matt/icn-prototype/did/layered_did.py
+
+```py
+    # layered_did.py
+    
+    from base_did import BaseDID
+    from typing import Dict, Optional
+    from dataclasses import field
+    
+    class LayeredDID(BaseDID):
+        """
+        Layered Decentralized Identifier (Layered DID).
+        
+        This class extends the base DID and allows for the creation of sub-DIDs, 
+        which are specific to each cooperative. This provides users with a layer of 
+        privacy and separation when interacting with different cooperatives, without 
+        linking their activities to their base DID.
+    
+        Attributes:
+        - sub_dids: A dictionary mapping cooperative IDs to their respective sub-DIDs.
+        """
+        sub_dids: Dict[str, str] = field(default_factory=dict)
+    
+        def add_sub_did(self, cooperative_id: str) -> str:
+            """
+            Generate and store a sub-DID specific to a cooperative.
+    
+            Args:
+            - cooperative_id: The unique identifier of the cooperative.
+    
+            Returns:
+            - str: The generated sub-DID.
+            """
+            sub_did = f"{self.generate_did()}:{hashlib.sha256(cooperative_id.encode()).hexdigest()[:8]}"
+            self.sub_dids[cooperative_id] = sub_did
+            return sub_did
+    
+        def get_sub_did(self, cooperative_id: str) -> Optional[str]:
+            """
+            Retrieve the sub-DID for a specific cooperative.
+    
+            Args:
+            - cooperative_id: The cooperative's unique ID.
+    
+            Returns:
+            - str | None: The sub-DID if found, otherwise None.
+            """
+            return self.sub_dids.get(cooperative_id)
+```
+
+# File: /home/matt/icn-prototype/did/registry.py
+
+```py
+    # registry.py
+    
+    from typing import Dict, Optional
+    from base_did import BaseDID
+    from datetime import datetime
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    class DIDRegistry:
+        """
+        Registry for managing DIDs within the InterCooperative Network (ICN).
+        
+        This registry handles registration, resolution, verification, and revocation of DIDs,
+        as well as integration with identity providers.
+        """
+        def __init__(self):
+            self.dids: Dict[str, BaseDID] = {}
+            self.revoked_dids: Dict[str, datetime] = {}
+            self._identity_providers: Dict[str, IdentityProvider] = {}
+    
+        def register_did(self, did: BaseDID) -> str:
+            """Register a new DID within the registry."""
+            did_id = did.generate_did()
+            if did_id in self.revoked_dids:
+                raise ValueError(f"DID {did_id} has been revoked")
+            self.dids[did_id] = did
+            logger.info(f"Registered new DID: {did_id}")
+            return did_id
+    
+        def resolve_did(self, did_id: str) -> Optional[BaseDID]:
+            """Resolve a DID to its corresponding object."""
+            if did_id in self.revoked_dids:
+                logger.warning(f"Attempted to resolve revoked DID: {did_id}")
+                return None
+            return self.dids.get(did_id)
+    
+        def revoke_did(self, did_id: str, reason: str) -> None:
+            """Revoke a DID."""
+            if did_id in self.dids:
+                self.revoked_dids[did_id] = datetime.now()
+                del self.dids[did_id]
+                logger.warning(f"DID revoked: {did_id}, reason: {reason}")
+```
+
+# File: /home/matt/icn-prototype/did/membership_card.py
+
+```py
+    # membership_card.py
+    
+    from dataclasses import dataclass, field
+    from typing import Dict
+    
+    @dataclass
+    class MembershipCard:
+        """
+        Soulbound Membership Card representing cooperative membership.
+        
+        This card is issued by cooperatives to their members, allowing them to participate 
+        in the cooperative and access its products and services. These tokens cannot be 
+        transferred and are permanently bound to the member's DID.
+    
+        Attributes:
+        - cooperative_id: The unique identifier of the cooperative issuing the card.
+        - member_did: The DID of the member to whom the card is issued.
+        - metadata: Additional data about the membership, such as roles or permissions.
+        - is_revoked: A boolean indicating whether the membership has been revoked.
+        """
+        cooperative_id: str
+        member_did: str
+        metadata: Dict = field(default_factory=dict)
+        is_revoked: bool = False
+    
+        def issue(self, member_did: str, metadata: Dict) -> MembershipCard:
+            """
+            Issue a new membership card for a cooperative member.
+    
+            Args:
+            - member_did: The DID of the member receiving the card.
+            - metadata: Additional data about the membership (e.g., roles, permissions).
+    
+            Returns:
+            - MembershipCard: The issued membership card.
+            """
+            self.member_did = member_did
+            self.metadata.update(metadata)
+            return self
+    
+        def revoke(self) -> None:
+            """
+            Revoke the membership card, invalidating it.
+            """
+            self.is_revoked = True
+```
+
+# File: /home/matt/icn-prototype/did/__init__.py
+
+```py
+
+```
+
+# File: /home/matt/icn-prototype/tests/unit/test_base_did.py
+
+```py
+    import unittest
+    import sys
+    import os
+    
+    # Add the project root directory to the Python path
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+    
+    # Import BaseDID from the 'did' module
+    from did.base_did import BaseDID
+    
+    class TestBaseDID(unittest.TestCase):
+    
+        def setUp(self):
+            """Set up a BaseDID instance before each test."""
+            self.did = BaseDID()
+    
+        def test_did_generation(self):
+            """Test DID generation logic."""
+            did = self.did.generate_did()
+            self.assertTrue(did.startswith("did:icn:"))
+            self.assertEqual(len(did), 24)  # Expected length: 24
+    
+        def test_add_membership(self):
+            """Test adding memberships to cooperatives and communities."""
+            self.did.add_membership('cooperative', 'coop1')
+            self.did.add_membership('community', 'comm1')
+    
+            self.assertIn('coop1', self.did.cooperative_memberships)
+            self.assertIn('comm1', self.did.community_memberships)
+    
+        def test_list_memberships(self):
+            """Test listing memberships by type or all."""
+            self.did.add_membership('cooperative', 'coop1')
+            self.did.add_membership('community', 'comm1')
+    
+            self.assertEqual(self.did.list_memberships('cooperative'), ['coop1'])
+            self.assertEqual(self.did.list_memberships('community'), ['comm1'])
+            self.assertEqual(self.did.list_memberships(), {'cooperative': ['coop1'], 'community': ['comm1']})
+    
+        def test_update_reputation(self):
+            """Test updating reputation scores."""
+            self.did.update_reputation('trustworthiness', 5.0, 'economic')
+            self.assertEqual(self.did.reputation_scores['economic']['trustworthiness'], 5.0)
+    
+            self.did.update_reputation('participation', 3.0, 'civil')
+            self.assertEqual(self.did.reputation_scores['civil']['participation'], 3.0)
+    
+        def test_get_total_reputation(self):
+            """Test total reputation calculation."""
+            self.did.update_reputation('trustworthiness', 5.0, 'economic')
+            self.did.update_reputation('participation', 3.0, 'civil')
+    
+            self.assertEqual(self.did.get_total_reputation('economic'), 5.0)
+            self.assertEqual(self.did.get_total_reputation('civil'), 3.0)
+    
+        def test_add_role(self):
+            """Test adding roles with permissions."""
+            self.did.add_role('admin', ['create', 'delete'], 'cooperative')
+            self.assertIn('admin', self.did.roles['cooperative'])
+            self.assertEqual(self.did.roles['cooperative']['admin'], ['create', 'delete'])
+    
+        def test_has_permission(self):
+            """Test permission checking within roles."""
+            self.did.add_role('admin', ['create', 'delete'], 'cooperative')
+    
+            self.assertTrue(self.did.has_permission('admin', 'create', 'cooperative'))
+            self.assertFalse(self.did.has_permission('admin', 'update', 'cooperative'))
+    
+        def test_invalid_membership_type(self):
+            """Test handling invalid membership types."""
+            with self.assertRaises(ValueError) as context:
+                self.did.add_membership('invalid_type', 'dao1')
+            self.assertEqual(str(context.exception), "Invalid DAO type: invalid_type")
+    
+        def test_invalid_role_type(self):
+            """Test handling invalid role types."""
+            with self.assertRaises(ValueError) as context:
+                self.did.add_role('admin', ['create'], 'invalid_type')
+            self.assertEqual(str(context.exception), "Invalid DAO type: invalid_type")
+    
+    if __name__ == '__main__':
+        unittest.main()
+```
+
+# File: /home/matt/icn-prototype/tests/unit/test_did.py
+
+```py
+    import unittest
+    from datetime import datetime, timedelta
+    from typing import Dict
+    
+    # Import the classes from did.py
+    from did.did import DID, Credential, IdentityProvider
+    
+    
+    class TestCredential(unittest.TestCase):
+    
+        def setUp(self):
+            """Set up a Credential instance for testing."""
+            self.credential = Credential(
+                issuer="did:icn:issuer",
+                subject="did:icn:subject",
+                claims={"role": "admin", "access": "full"},
+                expires_at=datetime.now() + timedelta(days=365)
+            )
+    
+        def test_credential_initialization(self):
+            """Test credential initialization and attributes."""
+            self.assertEqual(self.credential.issuer, "did:icn:issuer")
+            self.assertEqual(self.credential.subject, "did:icn:subject")
+            self.assertEqual(self.credential.claims["role"], "admin")
+            self.assertFalse(self.credential.is_expired())
+    
+        def test_verify_without_proof(self):
+            """Test verifying a credential without proof."""
+            self.assertFalse(self.credential.verify())
+    
+        def test_revoke_credential(self):
+            """Test revoking a credential."""
+            self.credential.revoke()
+            self.assertTrue(self.credential.is_expired())
+    
+        def test_credential_expiration(self):
+            """Test checking if a credential is expired."""
+            self.credential.expires_at = datetime.now() - timedelta(days=1)
+            self.assertTrue(self.credential.is_expired())
+    
+        def test_non_expired_credential(self):
+            """Test checking if a credential is not expired."""
+            self.credential.expires_at = datetime.now() + timedelta(days=1)
+            self.assertFalse(self.credential.is_expired())
+    
+    
+    class TestDID(unittest.TestCase):
+    
+        def setUp(self):
+            """Set up a DID instance for testing."""
+            self.did = DID()
+    
+        def test_generate_did(self):
+            """Test DID generation logic."""
+            did_str = self.did.generate_did()
+            self.assertTrue(did_str.startswith("did:icn:"))
+            self.assertEqual(len(did_str), 24)  # Adjusted expected length
+    
+        def test_encrypt_and_decrypt_data(self):
+            """Test encryption and decryption of data."""
+            data = "Sensitive data"
+            encrypted_data = self.did.encrypt_data(data)
+            decrypted_data = self.did.decrypt_data(encrypted_data)
+            self.assertEqual(decrypted_data, data)
+    
+        def test_encrypt_data_failure(self):
+            """Test failure during encryption with invalid input."""
+            with self.assertRaises(TypeError):
+                self.did.encrypt_data(None)
+    
+        def test_decrypt_data_failure(self):
+            """Test failure during decryption with invalid input."""
+            with self.assertRaises(ValueError):
+                self.did.decrypt_data(b"invalid_data")
+    
+        def test_add_cooperative_membership(self):
+            """Test adding cooperative membership."""
+            self.did.add_cooperative_membership("coop1")
+            self.assertIn("coop1", self.did.cooperative_memberships)
+    
+        def test_add_duplicate_cooperative_membership(self):
+            """Test adding duplicate cooperative membership."""
+            self.did.add_cooperative_membership("coop1")
+            self.did.add_cooperative_membership("coop1")
+            self.assertEqual(len(self.did.cooperative_memberships), 1)
+    
+        def test_update_reputation(self):
+            """Test updating reputation scores."""
+            self.did.update_reputation("trustworthiness", 5.0)
+            self.assertEqual(self.did.reputation_scores["trustworthiness"], 5.0)
+    
+        def test_update_reputation_with_evidence(self):
+            """Test updating reputation with evidence."""
+            evidence = {"details": "Participated in community event"}
+            self.did.update_reputation("participation", 3.0, evidence=evidence)
+            self.assertEqual(self.did.reputation_scores["participation"], 3.0)
+            self.assertIn("reputation_evidence", self.did.metadata)
+    
+        def test_get_total_reputation(self):
+            """Test calculating total reputation."""
+            self.did.update_reputation("trustworthiness", 5.0)
+            self.did.update_reputation("participation", 3.0)
+            total_reputation = self.did.get_total_reputation()
+            self.assertEqual(total_reputation, 8.0)
+    
+        def test_export_public_credentials(self):
+            """Test exporting public credentials."""
+            self.did.add_cooperative_membership("coop1")
+            public_data = self.did.export_public_credentials()
+            self.assertIn("did", public_data)
+            self.assertIn("cooperative_memberships", public_data)
+            self.assertIn("reputation_scores", public_data)
+    
+    
+    class MockIdentityProvider(IdentityProvider):
+        """Mock implementation of the IdentityProvider abstract class for testing."""
+    
+        def issue_credential(self, subject: str, claims: Dict) -> Credential:
+            """Issue a new credential."""
+            return Credential(
+                issuer="did:icn:issuer",
+                subject=subject,
+                claims=claims,
+                proof={"signature": "mock_signature"},  # Added mock proof
+                expires_at=datetime.now() + timedelta(days=365)
+            )
+    
+        def verify_credential(self, credential: Credential) -> bool:
+            """Verify a given credential."""
+            # Mock verification logic
+            return credential.proof is not None and "signature" in credential.proof
+    
+    
+    class TestIdentityProviderImplementation(unittest.TestCase):
+    
+        def setUp(self):
+            """Set up an IdentityProvider instance for testing."""
+            self.provider = MockIdentityProvider()
+    
+        def test_issue_credential(self):
+            """Test issuing a credential."""
+            credential = self.provider.issue_credential(
+                subject="did:icn:subject",
+                claims={"role": "admin", "access": "full"}
+            )
+            self.assertEqual(credential.subject, "did:icn:subject")
+            self.assertEqual(credential.claims["role"], "admin")
+            self.assertFalse(credential.is_expired())
+    
+        def test_verify_credential(self):
+            """Test verifying a credential."""
+            credential = self.provider.issue_credential(
+                subject="did:icn:subject",
+                claims={"role": "admin", "access": "full"}
+            )
+            self.assertTrue(self.provider.verify_credential(credential))
+    
+    
+    if __name__ == '__main__':
+        unittest.main()
+```

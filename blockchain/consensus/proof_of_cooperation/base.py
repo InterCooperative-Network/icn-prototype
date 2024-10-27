@@ -1,225 +1,247 @@
 """
-base.py
+blockchain/consensus/proof_of_cooperation/base.py
 
-This module provides base classes and interfaces for the Proof of Cooperation (PoC) consensus mechanism.
-It establishes the fundamental structures for validators, reputation management, and transaction processing.
-
-Classes:
-    BaseValidator
-    BaseReputationSystem
-    BaseTransaction
+Implements the core Proof of Cooperation consensus mechanism.
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+import logging
 
-class BaseValidator(ABC):
-    """
-    BaseValidator is an abstract base class that defines the fundamental structure
-    for validators in the Proof of Cooperation (PoC) consensus mechanism.
+from .reputation_manager import ReputationManager
+from .collusion_detector import CollusionDetector
+from .sanctions_manager import SanctionsManager
+from .validator_manager import ValidatorManager
+from .metrics_manager import MetricsManager
+from .cooldown_manager import CooldownManager
+from .types import ConsensusConfig, ValidationResult
+from ...core.node import Node
+from ...core.block import Block
 
-    Validators are responsible for verifying transactions, creating blocks, and participating
-    in shard management, all while maintaining a cooperative reputation system.
+logger = logging.getLogger(__name__)
+
+class ProofOfCooperation:
     """
+    Implements the Proof of Cooperation consensus mechanism for the ICN.
     
-    def __init__(self, node_id: str, cooperative_id: str):
-        """
-        Initialize a base validator with a unique node ID and cooperative ID.
-
-        Args:
-            node_id (str): Unique identifier for the validator node.
-            cooperative_id (str): Identifier for the cooperative the node belongs to.
-        """
-        self.node_id = node_id
-        self.cooperative_id = cooperative_id
-        self.reputation: Dict[str, float] = {"validation": 0.0, "cooperation": 0.0}  # Reputation scores
-        self.performance_metrics: Dict[str, Union[float, int]] = {"availability": 0.0, "success_rate": 0.0}
-        self.cooldown: int = 0  # Cooldown period after validation
-        self.inactivity_count: int = 0  # Track validator inactivity
-
-    @abstractmethod
-    def validate_transaction(self, transaction: Any) -> bool:
-        """
-        Validate a given transaction. This method must be implemented by subclasses.
-
-        Args:
-            transaction (Any): The transaction to validate.
-
-        Returns:
-            bool: True if the transaction is valid, False otherwise.
-        """
-        pass
-
-    @abstractmethod
-    def create_block(self) -> Optional[Any]:
-        """
-        Create a new block. This method must be implemented by subclasses.
-
-        Returns:
-            Optional[Any]: The newly created block, or None if block creation fails.
-        """
-        pass
-
-    def enter_cooldown(self, blocks: int) -> None:
-        """
-        Enter a cooldown period after successful validation.
-
-        Args:
-            blocks (int): Number of blocks the validator must wait before participating again.
-        """
-        self.cooldown = blocks
-
-    def decrease_cooldown(self) -> None:
-        """
-        Decrease the cooldown period by one block.
-        """
-        if self.cooldown > 0:
-            self.cooldown -= 1
-
-    def reset_performance_metrics(self) -> None:
-        """
-        Reset performance metrics to prepare for the next validation cycle.
-        """
-        self.performance_metrics = {"availability": 0.0, "success_rate": 0.0}
-
-    def update_reputation(self, category: str, score: float) -> None:
-        """
-        Update the validator's reputation score for a given category.
-
-        Args:
-            category (str): The category of reputation to update (e.g., 'validation', 'cooperation').
-            score (float): The score to add or subtract from the category.
-        """
-        if category in self.reputation:
-            self.reputation[category] += score
-            self.reputation[category] = max(0.0, min(self.reputation[category], 100.0))  # Cap reputation
-
-    def apply_inactivity_decay(self) -> None:
-        """
-        Apply decay to the validator's reputation if it has been inactive for multiple cycles.
-        """
-        if self.inactivity_count > 3:
-            decay_factor = 0.9
-            for category in self.reputation:
-                self.reputation[category] *= decay_factor
-
-    def increment_inactivity(self) -> None:
-        """
-        Increment the inactivity count when the validator fails to participate.
-        """
-        self.inactivity_count += 1
-
-    def reset_inactivity(self) -> None:
-        """
-        Reset the inactivity count when the validator successfully participates.
-        """
-        self.inactivity_count = 0
-
-class BaseReputationSystem(ABC):
+    Key Features:
+    - Modular integration with collusion detection, reputation, and sanctions management.
+    - Progressive reputation requirements for new nodes.
+    - Dynamic scoring adjustments.
+    - Enhanced validator eligibility checks.
+    - Improved shard-specific handling.
     """
-    BaseReputationSystem is an abstract base class that defines the structure for managing
-    reputation within the PoC network.
 
-    Reputation is a critical component of the consensus mechanism, influencing validator selection,
-    transaction validation, and cooperative interactions.
-    """
-    
-    def __init__(self):
-        self.reputation_scores: Dict[str, float] = {}  # Overall reputation scores for nodes
+    def __init__(self, min_reputation: float = 10.0, cooldown_blocks: int = 3):
+        """Initialize the PoC mechanism with its component managers."""
+        self.config = ConsensusConfig(
+            min_reputation=min_reputation,
+            cooldown_blocks=cooldown_blocks
+        )
+        
+        # Initialize component managers
+        self.reputation_manager = ReputationManager(self.config)
+        self.collusion_detector = CollusionDetector()
+        self.sanctions_manager = SanctionsManager(self.collusion_detector, self.reputation_manager)
+        self.validator_manager = ValidatorManager(
+            min_reputation=min_reputation, 
+            cooldown_blocks=cooldown_blocks, 
+            collusion_detector=self.collusion_detector
+        )
+        self.metrics_manager = MetricsManager()
+        self.cooldown_manager = CooldownManager(cooldown_blocks)
 
-    @abstractmethod
-    def update_reputation(self, node_id: str, category: str, score: float, evidence: Optional[Dict] = None) -> None:
+    def select_validator(self, nodes: List[Node], shard_id: Optional[int] = None) -> Optional[Node]:
         """
-        Update the reputation score for a specific category of a node.
-
+        Select a validator using modular checks for eligibility and cooperation score.
+        
         Args:
-            node_id (str): Identifier for the node whose reputation is being updated.
-            category (str): The category of reputation to update (e.g., 'validation', 'cooperation').
-            score (float): The score to add or subtract from the category.
-            evidence (Optional[Dict]): Optional evidence to support the reputation change.
+            nodes: List of potential validator nodes
+            shard_id: Optional shard ID for selection
+            
+        Returns:
+            Optional[Node]: Selected validator node, if any
         """
-        pass
+        try:
+            # Get list of eligible nodes
+            eligible_nodes = [
+                node for node in nodes 
+                if self._can_validate(node, shard_id)
+            ]
+            
+            if not eligible_nodes:
+                logger.warning("No eligible validators available")
+                return None
 
-    @abstractmethod
-    def get_reputation(self, node_id: str, category: str) -> float:
+            # Calculate cooperation scores
+            scores = [
+                self.reputation_manager.calculate_cooperation_score(node, shard_id)
+                for node in eligible_nodes
+            ]
+            total_score = sum(scores)
+            
+            if total_score <= 0:
+                return None
+
+            # Weighted random selection
+            selection_point = random.uniform(0, total_score)
+            current_sum = 0
+            
+            for node, score in zip(eligible_nodes, scores):
+                current_sum += score
+                if current_sum >= selection_point:
+                    # Apply cooldown and record selection
+                    self.cooldown_manager.apply_cooldown(node)
+                    self.metrics_manager.record_validation(
+                        ValidationResult(success=True), node.node_id, shard_id
+                    )
+                    logger.info(f"Selected validator {node.node_id} for shard {shard_id}")
+                    return node
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error selecting validator: {str(e)}")
+            return None
+
+    def validate_block(self, block: Block, previous_block: Optional[Block], validator: Node) -> bool:
         """
-        Get the current reputation score for a specific category of a node.
-
+        Validate a block using reputation, sanctions, and collusion checks.
+        
         Args:
-            node_id (str): Identifier for the node whose reputation is being retrieved.
-            category (str): The category of reputation to retrieve.
-
+            block: The block to validate
+            previous_block: Previous block in the chain
+            validator: The validating node
+            
         Returns:
-            float: The reputation score for the specified category.
+            bool: True if block is valid
         """
-        pass
+        try:
+            # Basic validation checks
+            if not self._can_validate_block(validator, block.shard_id):
+                logger.error(f"Validator {validator.node_id} not eligible")
+                return False
 
-    def apply_global_decay(self, decay_rate: float = 0.95) -> None:
+            if not block.validate(previous_block):
+                logger.error(f"Block {block.index} failed validation")
+                self._update_validation_stats(validator, block, False)
+                return False
+
+            # Check for collusion
+            if self.collusion_detector.detect_collusion(validator, block):
+                logger.warning(f"Collusion detected for block {block.index}")
+                self.sanctions_manager.apply_sanction(validator)
+                self._update_validation_stats(validator, block, False)
+                return False
+
+            # Update metrics and return success
+            self._update_validation_stats(validator, block, True)
+            logger.info(f"Block {block.index} validated successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error validating block: {str(e)}")
+            self._update_validation_stats(validator, block, False)
+            return False
+
+    def _can_validate(self, node: Node, shard_id: Optional[int] = None) -> bool:
         """
-        Apply global decay to all reputation scores to incentivize continuous participation.
-
+        Determine if a node can participate in consensus.
+        
         Args:
-            decay_rate (float): The rate at which reputation decays (default is 0.95).
+            node: Node to check
+            shard_id: Optional shard ID for specific checks
+            
+        Returns:
+            bool: True if node can participate
         """
-        for node, scores in self.reputation_scores.items():
-            for category in scores:
-                scores[category] *= decay_rate
+        try:
+            # Check if node is under sanctions
+            if self.sanctions_manager.get_sanction_status(node)[0] > 0:
+                return False
 
-class BaseTransaction(ABC):
-    """
-    BaseTransaction is an abstract base class that defines the structure for transactions
-    within the PoC network.
+            # Check reputation requirements
+            if not self.reputation_manager.can_validate(node, shard_id):
+                return False
 
-    Transactions represent the fundamental operations within the network, including transfers,
-    cooperative actions, and smart contract interactions.
-    """
-    
-    def __init__(self, sender: str, receiver: str, action: str, data: Dict[str, Any]):
+            # Check cooldown status
+            if not self.cooldown_manager.is_eligible(node):
+                return False
+
+            # Shard-specific checks
+            if shard_id is not None and not node.can_validate(shard_id):
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error checking validation eligibility: {str(e)}")
+            return False
+
+    def _can_validate_block(self, validator: Node, shard_id: Optional[int]) -> bool:
+        """Check if validator can validate a specific block."""
+        return self._can_validate(validator, shard_id)
+
+    def _update_validation_stats(self, validator: Node, block: Block, success: bool) -> None:
         """
-        Initialize a base transaction with sender, receiver, action, and data.
-
+        Update validation statistics for a validator.
+        
         Args:
-            sender (str): The sender's identifier.
-            receiver (str): The receiver's identifier.
-            action (str): The action to be performed by the transaction.
-            data (Dict[str, Any]): Additional data related to the transaction.
+            validator: The validating node
+            block: The validated block
+            success: Whether validation was successful
         """
-        self.sender = sender
-        self.receiver = receiver
-        self.action = action
-        self.data = data
+        try:
+            result = ValidationResult(
+                success=success,
+                block_height=block.index,
+                shard_id=block.shard_id
+            )
+            
+            # Update component metrics
+            self.metrics_manager.record_validation(result, validator.node_id, block.shard_id)
+            self.reputation_manager.update_stats(validator.node_id, result, block.shard_id)
+            
+            # Update validator reputation
+            if success:
+                self.reputation_manager.update_validator_reputation(validator, 1.0)
+            else:
+                self.reputation_manager.update_validator_reputation(validator, -1.0)
 
-    @abstractmethod
-    def execute(self) -> bool:
-        """
-        Execute the transaction. This method must be implemented by subclasses.
+        except Exception as e:
+            logger.error(f"Error updating validation stats: {str(e)}")
 
-        Returns:
-            bool: True if the transaction is executed successfully, False otherwise.
-        """
-        pass
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get comprehensive consensus metrics."""
+        return {
+            "reputation_metrics": self.reputation_manager.get_metrics(),
+            "validation_metrics": self.metrics_manager.get_metrics(),
+            "sanctions_metrics": self.sanctions_manager.get_metrics(),
+            "collusion_metrics": self.collusion_detector.get_metrics()
+        }
 
-    @abstractmethod
-    def validate(self) -> bool:
-        """
-        Validate the transaction. This method must be implemented by subclasses.
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert consensus state to dictionary format."""
+        return {
+            "config": self.config.to_dict(),
+            "reputation_manager": self.reputation_manager.to_dict(),
+            "sanctions_manager": self.sanctions_manager.to_dict(),
+            "metrics_manager": self.metrics_manager.to_dict(),
+            "cooldown_manager": self.cooldown_manager.to_dict()
+        }
 
-        Returns:
-            bool: True if the transaction is valid, False otherwise.
-        """
-        pass
-
-    def get_cooperative_score(self) -> float:
-        """
-        Calculate the cooperative score of the transaction, based on its data and action.
-
-        Returns:
-            float: The calculated cooperative score.
-        """
-        return self.data.get("cooperative_score", 0.0)
-
-    def log_transaction(self) -> None:
-        """
-        Log transaction details for auditing and debugging purposes.
-        """
-        print(f"Transaction from {self.sender} to {self.receiver} | Action: {self.action} | Data: {self.data}")
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ProofOfCooperation':
+        """Create consensus instance from dictionary."""
+        config = ConsensusConfig.from_dict(data["config"])
+        instance = cls(
+            min_reputation=config.min_reputation,
+            cooldown_blocks=config.cooldown_blocks
+        )
+        
+        instance.reputation_manager = ReputationManager.from_dict(data["reputation_manager"])
+        instance.sanctions_manager = SanctionsManager.from_dict(data["sanctions_manager"])
+        instance.metrics_manager = MetricsManager.from_dict(data["metrics_manager"])
+        instance.cooldown_manager = CooldownManager.from_dict(data["cooldown_manager"])
+        
+        return instance

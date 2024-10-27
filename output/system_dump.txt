@@ -1,0 +1,768 @@
+# Project Context:
+The InterCooperative Network (ICN) is a decentralized cooperative management system designed to support global governance, privacy-preserving identity, and resource sharing. It uses blockchain technology for consensus and DIDs for secure identities, with modules designed for scalable, democratic interaction. The ICN promotes cooperative-based decision-making, transparent governance, and equitable resource distribution.
+
+# Module: system
+# Purpose: Manages system-level operations, including node management and consensus monitoring.
+# Vision Alignment: Coordinates cooperative governance and resource sharing, supporting the decentralized operations of ICN nodes and decision-making processes.
+# Interaction with Other Modules: Works with 'blockchain' for block propagation and 'api' for control.
+
+
+# Code Files for Module: system
+
+
+# File: /home/matt/icn-prototype/system/marketplace.py
+
+```py
+    from typing import Dict
+    
+    class Listing:
+        def __init__(self, id, seller, item, price):
+            self.id = id
+            self.seller = seller
+            self.item = item
+            self.price = price
+    
+    class Order:
+        def __init__(self, id, buyer, listing):
+            self.id = id
+            self.buyer = buyer
+            self.listing = listing
+            self.status = "pending"
+    
+    class Marketplace:
+        def __init__(self, blockchain, did_registry):
+            self.blockchain = blockchain
+            self.did_registry = did_registry
+            self.listings: Dict[str, Listing] = {}
+            self.orders: Dict[str, Order] = {}
+    
+        def create_listing(self, listing_id, seller_did, item, price):
+            seller = self.did_registry.resolve_did(seller_did)
+            if not seller:
+                return None
+            
+            listing = Listing(listing_id, seller_did, item, price)
+            self.listings[listing_id] = listing
+            self.blockchain.add_new_block(f"Listing created: {listing_id}", 1)  # Assume shard 1 for marketplace
+            return listing_id
+    
+        def remove_listing(self, listing_id, seller_did):
+            listing = self.listings.get(listing_id)
+            if listing and listing.seller == seller_did:
+                del self.listings[listing_id]
+                self.blockchain.add_new_block(f"Listing removed: {listing_id}", 1)
+                return True
+            return False
+    
+        def place_order(self, order_id, buyer_did, listing_id):
+            listing = self.listings.get(listing_id)
+            buyer = self.did_registry.resolve_did(buyer_did)
+            if not listing or not buyer:
+                return False
+            
+            order = Order(order_id, buyer_did, listing)
+            self.orders[order_id] = order
+            self.blockchain.add_new_block(f"Order placed: {order_id}", 1)
+            return True
+    
+        def complete_order(self, order_id):
+            order = self.orders.get(order_id)
+            if not order:
+                return None
+            
+            # In a real system, you'd implement escrow release here
+            order.status = "completed"
+            self.blockchain.add_new_block(f"Order completed: {order_id}", 1)
+            return order
+    
+        def get_listing(self, listing_id):
+            return self.listings.get(listing_id)
+    
+        def get_order(self, order_id):
+            return self.orders.get(order_id)
+    
+        def list_listings(self):
+            return self.listings
+    
+        def list_orders(self):
+            return self.orders
+    
+        def get_seller_reputation(self, seller_did):
+            seller = self.did_registry.resolve_did(seller_did)
+            if seller:
+                return seller.get_reputation_scores().get("marketplace", 0)
+            return 0
+```
+
+# File: /home/matt/icn-prototype/system/reputation.py
+
+```py
+    # system/reputation.py
+    
+    from typing import Dict, List, Optional, Set
+    from datetime import datetime, timedelta
+    import logging
+    from dataclasses import dataclass, field
+    import math
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class ReputationEvent:
+        """Represents a reputation-changing event."""
+        category: str
+        score: float
+        timestamp: datetime
+        evidence: Optional[Dict] = None
+        decay_rate: float = 0.1
+    
+        def get_current_value(self, current_time: datetime) -> float:
+            """Calculate the current value of the reputation event with decay."""
+            age = (current_time - self.timestamp).total_seconds() / (24 * 3600)  # age in days
+            return self.score * math.exp(-self.decay_rate * age)
+    
+    class ReputationCategory:
+        """Manages reputation for a specific category."""
+        
+        def __init__(self, name: str, weight: float = 1.0, 
+                     decay_rate: float = 0.1):
+            self.name = name
+            self.weight = weight
+            self.decay_rate = decay_rate
+            self.events: List[ReputationEvent] = []
+            self.minimum_score = 0.0
+            self.maximum_score = float('inf')
+    
+        def add_event(self, score: float, evidence: Optional[Dict] = None) -> None:
+            """Add a new reputation event."""
+            event = ReputationEvent(
+                category=self.name,
+                score=score,
+                timestamp=datetime.now(),
+                evidence=evidence,
+                decay_rate=self.decay_rate
+            )
+            self.events.append(event)
+    
+        def get_current_score(self) -> float:
+            """Calculate current score with decay."""
+            current_time = datetime.now()
+            total_score = sum(event.get_current_value(current_time) 
+                             for event in self.events)
+            return max(min(total_score, self.maximum_score), self.minimum_score)
+    
+        def prune_old_events(self, max_age_days: int = 30) -> None:
+            """Remove events older than specified age."""
+            cutoff_time = datetime.now() - timedelta(days=max_age_days)
+            self.events = [event for event in self.events 
+                          if event.timestamp >= cutoff_time]
+    
+    class ReputationSystem:
+        """Enhanced reputation system for ICN."""
+        
+        def __init__(self):
+            self.categories: Dict[str, ReputationCategory] = {
+                "validation": ReputationCategory("validation", 1.0, 0.1),
+                "voting": ReputationCategory("voting", 1.2, 0.05),
+                "proposal_creation": ReputationCategory("proposal_creation", 1.5, 0.03),
+                "development": ReputationCategory("development", 2.0, 0.02),
+                "budget_management": ReputationCategory("budget_management", 1.8, 0.08),
+                "community_building": ReputationCategory("community_building", 1.3, 0.04),
+                "resource_sharing": ReputationCategory("resource_sharing", 1.4, 0.06),
+                "cooperative_growth": ReputationCategory("cooperative_growth", 1.6, 0.03),
+                "conflict_resolution": ReputationCategory("conflict_resolution", 1.7, 0.05),
+                "sustainability": ReputationCategory("sustainability", 1.5, 0.04),
+                "participation": ReputationCategory("participation", 1.1, 0.07),
+                "innovation": ReputationCategory("innovation", 1.9, 0.02),
+            }
+            self.user_reputations: Dict[str, Dict[str, ReputationCategory]] = {}
+            self.user_metadata: Dict[str, Dict] = {}
+            self.registered_users: Set[str] = set()
+            
+        def add_user(self, user_id: str, metadata: Optional[Dict] = None) -> None:
+            """Initialize reputation categories for a new user."""
+            if user_id not in self.user_reputations:
+                self.user_reputations[user_id] = {
+                    name: ReputationCategory(name, cat.weight, cat.decay_rate)
+                    for name, cat in self.categories.items()
+                }
+                self.user_metadata[user_id] = metadata or {}
+                self.registered_users.add(user_id)
+                logger.info(f"Initialized reputation for user: {user_id}")
+    
+        def remove_user(self, user_id: str) -> bool:
+            """Remove a user from the reputation system."""
+            if user_id in self.user_reputations:
+                del self.user_reputations[user_id]
+                del self.user_metadata[user_id]
+                self.registered_users.remove(user_id)
+                logger.info(f"Removed user: {user_id}")
+                return True
+            return False
+    
+        def get_all_users(self) -> List[str]:
+            """Get list of all registered users."""
+            return list(self.registered_users)
+    
+        def update_reputation(self, user_id: str, score: float, 
+                             category: str, evidence: Optional[Dict] = None) -> bool:
+            """Update a user's reputation with evidence."""
+            if user_id not in self.user_reputations:
+                logger.warning(f"Unknown user: {user_id}")
+                return False
+            
+            if category not in self.user_reputations[user_id]:
+                logger.warning(f"Unknown category: {category}")
+                return False
+    
+            if score == 0:
+                return True
+    
+            self.user_reputations[user_id][category].add_event(score, evidence)
+            logger.info(f"Updated reputation for {user_id} in {category}: {score}")
+            
+            # Update participation category automatically
+            if category != "participation":
+                self.user_reputations[user_id]["participation"].add_event(
+                    abs(score) * 0.1,  # Small participation score for any activity
+                    {"source_category": category}
+                )
+            
+            return True
+    
+        def get_reputation(self, user_id: str) -> Dict[str, float]:
+            """Get current reputation scores for a user."""
+            if user_id not in self.user_reputations:
+                return {}
+            
+            return {
+                category: rep_category.get_current_score()
+                for category, rep_category in self.user_reputations[user_id].items()
+            }
+    
+        def get_total_reputation(self, user_id: str) -> float:
+            """Calculate total weighted reputation score."""
+            if user_id not in self.user_reputations:
+                return 0.0
+            
+            scores = self.get_reputation(user_id)
+            weighted_scores = [
+                score * self.categories[category].weight
+                for category, score in scores.items()
+            ]
+            return sum(weighted_scores)
+    
+        def get_user_ranking(self, category: Optional[str] = None) -> List[tuple]:
+            """Get users ranked by reputation in a category or overall."""
+            if category and category not in self.categories:
+                return []
+    
+            rankings = []
+            for user_id in self.registered_users:
+                if category:
+                    score = self.get_reputation(user_id).get(category, 0)
+                else:
+                    score = self.get_total_reputation(user_id)
+                rankings.append((user_id, score))
+    
+            return sorted(rankings, key=lambda x: x[1], reverse=True)
+    
+        def apply_decay(self) -> None:
+            """Apply reputation decay to all users."""
+            current_time = datetime.now()
+            for user_reputations in self.user_reputations.values():
+                for category in user_reputations.values():
+                    category.prune_old_events()
+    
+        def get_reputation_history(self, user_id: str, category: str,
+                                 days: int = 30) -> List[Dict]:
+            """Get historical reputation events for a category."""
+            if user_id not in self.user_reputations:
+                return []
+            
+            category_rep = self.user_reputations[user_id].get(category)
+            if not category_rep:
+                return []
+    
+            cutoff_time = datetime.now() - timedelta(days=days)
+            history = []
+            
+            for event in category_rep.events:
+                if event.timestamp >= cutoff_time:
+                    history.append({
+                        'timestamp': event.timestamp,
+                        'score': event.score,
+                        'evidence': event.evidence,
+                        'current_value': event.get_current_value(datetime.now())
+                    })
+                    
+            return sorted(history, key=lambda x: x['timestamp'])
+    
+        def get_category_thresholds(self, category: str) -> Optional[Dict[str, float]]:
+            """Get the minimum and maximum thresholds for a category."""
+            if category not in self.categories:
+                return None
+                
+            return {
+                'minimum': self.categories[category].minimum_score,
+                'maximum': self.categories[category].maximum_score
+            }
+    
+        def set_category_thresholds(self, category: str, 
+                                  minimum: float, maximum: float) -> bool:
+            """Set the minimum and maximum thresholds for a category."""
+            if category not in self.categories:
+                return False
+                
+            if minimum > maximum:
+                return False
+                
+            self.categories[category].minimum_score = minimum
+            self.categories[category].maximum_score = maximum
+            return True
+    
+        def get_system_stats(self) -> Dict:
+            """Get system-wide reputation statistics."""
+            stats = {
+                'total_users': len(self.registered_users),
+                'total_events': 0,
+                'category_averages': {},
+                'top_users': self.get_user_ranking()[:10]
+            }
+            
+            for category in self.categories:
+                scores = []
+                total_events = 0
+                for user_id in self.registered_users:
+                    user_rep = self.user_reputations.get(user_id, {}).get(category)
+                    if user_rep:
+                        scores.append(user_rep.get_current_score())
+                        total_events += len(user_rep.events)
+                
+                if scores:
+                    stats['category_averages'][category] = sum(scores) / len(scores)
+                else:
+                    stats['category_averages'][category] = 0
+                
+                stats['total_events'] += total_events
+            
+            return stats
+```
+
+# File: /home/matt/icn-prototype/system/governance.py
+
+```py
+    # system/governance.py
+    
+    from typing import Dict, List, Optional, Union
+    from datetime import datetime, timedelta
+    import logging
+    from dataclasses import dataclass, field
+    import math
+    import json
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class Proposal:
+        """Represents a governance proposal in the ICN system."""
+        id: str
+        title: str
+        description: str
+        creator: str
+        proposal_type: str
+        options: List[str]
+        amount: Optional[float] = None
+        start_time: datetime = field(default_factory=datetime.now)
+        end_time: Optional[datetime] = None
+        status: str = "pending"
+        metadata: Dict = field(default_factory=dict)
+        votes: Dict[str, int] = field(default_factory=dict)
+        vote_weights: Dict[str, float] = field(default_factory=dict)
+        
+        def to_dict(self) -> Dict:
+            """Convert proposal to dictionary format."""
+            return {
+                'id': self.id,
+                'title': self.title,
+                'description': self.description,
+                'creator': self.creator,
+                'type': self.proposal_type,
+                'options': self.options,
+                'amount': self.amount,
+                'start_time': self.start_time.isoformat(),
+                'end_time': self.end_time.isoformat() if self.end_time else None,
+                'status': self.status,
+                'metadata': self.metadata,
+                'votes': self.votes,
+                'vote_weights': self.vote_weights
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict) -> 'Proposal':
+            """Create proposal from dictionary."""
+            proposal = cls(
+                id=data['id'],
+                title=data['title'],
+                description=data['description'],
+                creator=data['creator'],
+                proposal_type=data['type'],
+                options=data['options'],
+                amount=data.get('amount'),
+                start_time=datetime.fromisoformat(data['start_time']),
+                status=data['status'],
+                metadata=data.get('metadata', {})
+            )
+            if data.get('end_time'):
+                proposal.end_time = datetime.fromisoformat(data['end_time'])
+            proposal.votes = data.get('votes', {})
+            proposal.vote_weights = data.get('vote_weights', {})
+            return proposal
+    
+    class VotingSystem:
+        """Manages voting mechanics for proposals."""
+        
+        def __init__(self, quorum_percentage: float = 0.4):
+            self.quorum_percentage = quorum_percentage
+            self.vote_records: Dict[str, Dict[str, Dict]] = {}
+    
+        def cast_vote(self, proposal_id: str, voter_id: str, choice: str,
+                      weight: float = 1.0) -> bool:
+            """Cast a weighted vote on a proposal."""
+            if proposal_id not in self.vote_records:
+                self.vote_records[proposal_id] = {}
+                
+            self.vote_records[proposal_id][voter_id] = {
+                'choice': choice,
+                'weight': weight,
+                'timestamp': datetime.now()
+            }
+            return True
+    
+        def get_results(self, proposal_id: str) -> Dict[str, float]:
+            """Calculate weighted voting results."""
+            if proposal_id not in self.vote_records:
+                return {}
+                
+            results = {}
+            for vote_info in self.vote_records[proposal_id].values():
+                choice = vote_info['choice']
+                weight = vote_info['weight']
+                results[choice] = results.get(choice, 0) + weight
+                
+            return results
+    
+        def has_quorum(self, proposal_id: str, total_voters: int) -> bool:
+            """Check if proposal has reached quorum."""
+            if proposal_id not in self.vote_records:
+                return False
+                
+            participation = len(self.vote_records[proposal_id]) / total_voters
+            return participation >= self.quorum_percentage
+    
+    class Governance:
+        """Main governance system for the ICN."""
+        
+        def __init__(self, blockchain, reputation_system):
+            self.blockchain = blockchain
+            self.reputation_system = reputation_system
+            self.proposals: Dict[str, Proposal] = {}
+            self.voting_system = VotingSystem()
+            self.bylaws: Dict[str, str] = {}
+            self.funds: float = 0
+            self.approval_thresholds = {
+                "constitution": 0.75,  # Constitutional changes require 75% approval
+                "bylaw": 0.66,        # Bylaw changes require 66% approval
+                "budget": 0.60,       # Budget proposals require 60% approval
+                "standard": 0.51      # Standard proposals require simple majority
+            }
+    
+        def create_proposal(self, proposal: Proposal) -> bool:
+            """Create a new governance proposal."""
+            try:
+                # Validate creator's reputation
+                creator_rep = self.reputation_system.get_reputation(proposal.creator)
+                if creator_rep.get('proposal_creation', 0) < 10:
+                    logger.warning(f"Insufficient reputation for proposal creation: {proposal.creator}")
+                    return False
+    
+                # Validate proposal type
+                if proposal.proposal_type not in self.approval_thresholds:
+                    logger.error(f"Invalid proposal type: {proposal.proposal_type}")
+                    return False
+    
+                self.proposals[proposal.id] = proposal
+                
+                # Create blockchain transaction
+                transaction = {
+                    'type': 'proposal_creation',
+                    'proposal_id': proposal.id,
+                    'creator': proposal.creator,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                self.blockchain.add_transaction(transaction)
+                logger.info(f"Created proposal: {proposal.id}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to create proposal: {e}")
+                return False
+    
+        def start_voting(self, proposal_id: str, duration_days: int = 7) -> bool:
+            """Start the voting period for a proposal."""
+            proposal = self.proposals.get(proposal_id)
+            if not proposal or proposal.status != "pending":
+                return False
+    
+            proposal.status = "active"
+            proposal.start_time = datetime.now()
+            proposal.end_time = proposal.start_time + timedelta(days=duration_days)
+    
+            transaction = {
+                'type': 'voting_start',
+                'proposal_id': proposal_id,
+                'start_time': proposal.start_time.isoformat(),
+                'end_time': proposal.end_time.isoformat()
+            }
+    
+            self.blockchain.add_transaction(transaction)
+            logger.info(f"Started voting for proposal: {proposal_id}")
+            return True
+    
+        def cast_vote(self, proposal_id: str, voter_id: str, choice: str) -> bool:
+            """Cast a vote on an active proposal."""
+            proposal = self.proposals.get(proposal_id)
+            if not proposal or proposal.status != "active":
+                return False
+    
+            if datetime.now() > proposal.end_time:
+                logger.warning(f"Voting period ended for proposal: {proposal_id}")
+                return False
+    
+            # Calculate voting power based on reputation
+            reputation = self.reputation_system.get_reputation(voter_id)
+            voting_power = self._calculate_voting_power(reputation)
+    
+            # Record vote
+            if self.voting_system.cast_vote(proposal_id, voter_id, choice, voting_power):
+                transaction = {
+                    'type': 'vote_cast',
+                    'proposal_id': proposal_id,
+                    'voter': voter_id,
+                    'choice': choice,
+                    'weight': voting_power
+                }
+                self.blockchain.add_transaction(transaction)
+    
+                # Update voter's reputation
+                self.reputation_system.update_reputation(
+                    voter_id,
+                    1.0,
+                    'voting',
+                    {'proposal_id': proposal_id}
+                )
+    
+                logger.info(f"Recorded vote from {voter_id} on proposal {proposal_id}")
+                return True
+    
+            return False
+    
+        def _calculate_voting_power(self, reputation: Dict[str, float]) -> float:
+            """Calculate voting power based on reputation scores."""
+            # Calculate base voting power from reputation
+            base_power = sum(reputation.values()) / len(reputation)
+            
+            # Apply square root to prevent excessive concentration of power
+            return math.sqrt(max(1.0, base_power))
+    
+        def finalize_proposal(self, proposal_id: str) -> bool:
+            """Finalize a proposal after voting period."""
+            proposal = self.proposals.get(proposal_id)
+            if not proposal or proposal.status != "active":
+                return False
+    
+            if datetime.now() < proposal.end_time:
+                logger.warning(f"Voting period still active for proposal: {proposal_id}")
+                return False
+    
+            results = self.voting_system.get_results(proposal_id)
+            if not results:
+                proposal.status = "failed"
+                return False
+    
+            total_voters = len(self.reputation_system.get_all_users())
+            if not self.voting_system.has_quorum(proposal_id, total_voters):
+                proposal.status = "failed"
+                logger.info(f"Proposal {proposal_id} failed due to lack of quorum")
+                return False
+    
+            # Calculate approval percentage
+            total_votes = sum(results.values())
+            approval_percentage = results.get("approve", 0) / total_votes
+    
+            # Get required threshold
+            threshold = self.approval_thresholds[proposal.proposal_type]
+    
+            if approval_percentage >= threshold:
+                proposal.status = "approved"
+                self._implement_proposal(proposal)
+            else:
+                proposal.status = "rejected"
+    
+            transaction = {
+                'type': 'proposal_finalization',
+                'proposal_id': proposal_id,
+                'status': proposal.status,
+                'results': results
+            }
+            self.blockchain.add_transaction(transaction)
+    
+            logger.info(f"Finalized proposal {proposal_id} with status: {proposal.status}")
+            return True
+    
+        def _implement_proposal(self, proposal: Proposal) -> None:
+            """Implement an approved proposal."""
+            implementation_handlers = {
+                "budget": self._implement_budget_proposal,
+                "bylaw": self._implement_bylaw_proposal,
+                "constitution": self._implement_constitution_proposal,
+            }
+            
+            handler = implementation_handlers.get(proposal.proposal_type)
+            if handler:
+                handler(proposal)
+    
+        def _implement_budget_proposal(self, proposal: Proposal) -> None:
+            """Implement a budget proposal."""
+            if proposal.amount and self.funds >= proposal.amount:
+                self.funds -= proposal.amount
+                transaction = {
+                    'type': 'budget_execution',
+                    'proposal_id': proposal.id,
+                    'amount': proposal.amount
+                }
+                self.blockchain.add_transaction(transaction)
+    
+        def _implement_bylaw_proposal(self, proposal: Proposal) -> None:
+            """Implement a bylaw proposal."""
+            self.bylaws[proposal.title] = proposal.description
+            transaction = {
+                'type': 'bylaw_update',
+                'proposal_id': proposal.id,
+                'title': proposal.title
+            }
+            self.blockchain.add_transaction(transaction)
+    
+        def _implement_constitution_proposal(self, proposal: Proposal) -> None:
+            """Implement a constitutional proposal."""
+            transaction = {
+                'type': 'constitution_update',
+                'proposal_id': proposal.id,
+                'changes': proposal.metadata.get('changes', {})
+            }
+            self.blockchain.add_transaction(transaction)
+    
+        def get_proposal(self, proposal_id: str) -> Optional[Proposal]:
+            """Get a specific proposal."""
+            return self.proposals.get(proposal_id)
+    
+        def get_active_proposals(self) -> List[Proposal]:
+            """Get all currently active proposals."""
+            return [p for p in self.proposals.values() if p.status == "active"]
+    
+        def get_proposal_metrics(self) -> Dict:
+            """Get metrics about proposal activity."""
+            return {
+                'total_proposals': len(self.proposals),
+                'active_proposals': len([p for p in self.proposals.values() if p.status == "active"]),
+                'approved_proposals': len([p for p in self.proposals.values() if p.status == "approved"]),
+                'rejected_proposals': len([p for p in self.proposals.values() if p.status == "rejected"]),
+                'average_participation': self._calculate_average_participation()
+            }
+    
+        def _calculate_average_participation(self) -> float:
+            """Calculate average participation rate in voted proposals."""
+            voted_proposals = [p for p in self.proposals.values() 
+                             if p.status in ["approved", "rejected"]]
+            if not voted_proposals:
+                return 0.0
+    
+            total_users = len(self.reputation_system.get_all_users())
+            participation_rates = []
+    
+            for proposal in voted_proposals:
+                if proposal.id in self.voting_system.vote_records:
+                    participation = len(self.voting_system.vote_records[proposal.id]) / total_users
+                    participation_rates.append(participation)
+    
+            return sum(participation_rates) / len(participation_rates) if participation_rates else 0.0
+```
+
+# File: /home/matt/icn-prototype/system/storage.py
+
+```py
+    import hashlib
+    from typing import Dict, List
+    
+    class DataChunk:
+        def __init__(self, data: bytes):
+            self.data = data
+            self.hash = hashlib.sha256(data).hexdigest()
+    
+    class DistributedStorage:
+        def __init__(self, blockchain):
+            self.blockchain = blockchain
+            self.data_chunks: Dict[str, DataChunk] = {}
+            self.file_mappings: Dict[str, List[str]] = {}
+    
+        def store_file(self, file_name: str, data: bytes) -> str:
+            chunk_size = 1024 * 1024  # 1 MB chunks
+            chunks = [data[i:i+chunk_size] for i in range(0, len(data), chunk_size)]
+            
+            chunk_hashes = []
+            for chunk in chunks:
+                data_chunk = DataChunk(chunk)
+                self.data_chunks[data_chunk.hash] = data_chunk
+                chunk_hashes.append(data_chunk.hash)
+            
+            file_hash = hashlib.sha256(("".join(chunk_hashes)).encode()).hexdigest()
+            self.file_mappings[file_hash] = chunk_hashes
+            
+            self.blockchain.add_new_block(f"File stored: {file_hash}", 2)  # Assume shard 2 for storage
+            return file_hash
+    
+        def retrieve_file(self, file_hash: str) -> bytes:
+            chunk_hashes = self.file_mappings.get(file_hash)
+            if not chunk_hashes:
+                return None
+            
+            file_data = b""
+            for chunk_hash in chunk_hashes:
+                chunk = self.data_chunks.get(chunk_hash)
+                if chunk:
+                    file_data += chunk.data
+                else:
+                    return None  # File is incomplete
+            
+            return file_data
+    
+        def delete_file(self, file_hash: str) -> bool:
+            chunk_hashes = self.file_mappings.get(file_hash)
+            if not chunk_hashes:
+                return False
+            
+            for chunk_hash in chunk_hashes:
+                if chunk_hash in self.data_chunks:
+                    del self.data_chunks[chunk_hash]
+            
+            del self.file_mappings[file_hash]
+            self.blockchain.add_new_block(f"File deleted: {file_hash}", 2)
+            return True
+```
+
+# File: /home/matt/icn-prototype/system/__init__.py
+
+```py
+
+```

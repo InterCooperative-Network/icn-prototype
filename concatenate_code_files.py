@@ -2,8 +2,60 @@ import os
 import time
 
 # Define directories and files to exclude
-EXCLUDE_DIRS = ["__pycache__", ".git", "node_modules", "build", "dist", "venv", ".idea", "icn_env", "docs", "icn-docs"]
+EXCLUDE_DIRS = ["__pycache__", ".git", "node_modules", "build", "dist", "venv", ".idea", "icn_env", "docs", "icn-docs", "output"]
 EXCLUDE_FILES = [".pyc", ".pyo", ".log", ".tmp", ".cache", ".DS_Store"]
+
+# Define context mapping for modules
+MODULE_CONTEXT = {
+    "blockchain": {
+        "purpose": "Handles core blockchain logic, consensus mechanisms, and transaction validation.",
+        "vision_alignment": (
+            "This module ensures decentralized, cooperative-based transactions and consensus, "
+            "forming the backbone of the ICN's transparent governance and trustless operations."
+        ),
+        "interaction": "Integrates with 'did' for identity verification and 'api' for interaction."
+    },
+    "did": {
+        "purpose": "Manages Decentralized Identifiers (DIDs) for secure, privacy-preserving user identities.",
+        "vision_alignment": (
+            "Enables privacy-focused governance and secure user participation, aligning with the ICN's "
+            "commitment to privacy, identity security, and cooperative integrity."
+        ),
+        "interaction": "Works with 'blockchain' for identity validation and 'api' for authentication."
+    },
+    "tests": {
+        "purpose": "Ensures the reliability and performance of ICN components through comprehensive testing.",
+        "vision_alignment": (
+            "Maintains system integrity by validating that all modules perform as expected, "
+            "supporting ICN’s stability and trustworthiness."
+        ),
+        "interaction": "Covers tests for 'blockchain,' 'did,' 'api,' and 'system' components."
+    },
+    "api": {
+        "purpose": "Facilitates external interactions with ICN, enabling seamless integration and user interfaces.",
+        "vision_alignment": (
+            "Acts as the gateway for cooperative engagement, making ICN accessible to external applications "
+            "and users, supporting cooperative growth and interoperability."
+        ),
+        "interaction": "Connects with 'blockchain' for transactions, 'did' for identity management."
+    },
+    "system": {
+        "purpose": "Manages system-level operations, including node management and consensus monitoring.",
+        "vision_alignment": (
+            "Coordinates cooperative governance and resource sharing, supporting the decentralized operations "
+            "of ICN nodes and decision-making processes."
+        ),
+        "interaction": "Works with 'blockchain' for block propagation and 'api' for control."
+    }
+}
+
+# General project context
+PROJECT_CONTEXT = (
+    "The InterCooperative Network (ICN) is a decentralized cooperative management system designed to support "
+    "global governance, privacy-preserving identity, and resource sharing. It uses blockchain technology for "
+    "consensus and DIDs for secure identities, with modules designed for scalable, democratic interaction. "
+    "The ICN promotes cooperative-based decision-making, transparent governance, and equitable resource distribution."
+)
 
 def tree_structure(startpath, max_depth=3):
     """
@@ -18,13 +70,11 @@ def tree_structure(startpath, max_depth=3):
         if depth > max_depth:
             continue
 
-        # Exclude irrelevant directories
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-
         indent = " " * 4 * depth
         tree_str += f"{indent}{os.path.basename(root)}/\n"
-
         sub_indent = " " * 4 * (depth + 1)
+
         for file in files:
             if any(file.endswith(ext) for ext in EXCLUDE_FILES):
                 continue
@@ -33,95 +83,102 @@ def tree_structure(startpath, max_depth=3):
     return tree_str
 
 
-def concatenate_code_files(source_dir, output_file, extensions=None, max_depth=3):
+def create_output_file(output_dir, module_name, project_structure, content_str):
     """
-    Concatenate code files from a directory, excluding cache files, documentation files,
-    and irrelevant directories like 'icn-docs'.
+    Create a new output file for a specific module, including the project structure and context.
+    """
+    output_file = os.path.join(output_dir, f"{module_name}_dump.txt")
+    with open(output_file, "w", encoding="utf-8") as outfile:
+        # Add general project context and module-specific context
+        outfile.write("# Project Context:\n")
+        outfile.write(PROJECT_CONTEXT + "\n\n")
+        
+        context = MODULE_CONTEXT.get(module_name, {})
+        module_overview = f"# Module: {module_name}\n"
+        module_overview += f"# Purpose: {context.get('purpose', 'No specific context provided.')}\n"
+        module_overview += f"# Vision Alignment: {context.get('vision_alignment', 'No vision context provided.')}\n"
+        module_overview += f"# Interaction with Other Modules: {context.get('interaction', 'No interaction details provided.')}\n"
+        outfile.write(module_overview)
+        outfile.write("\n\n")
+
+        # Add module-specific content
+        outfile.write("# Code Files for Module: {}\n\n".format(module_name))
+        outfile.write(content_str)
+
+    print(f"Created output file: {output_file}")
+
+
+def get_closest_module(file_path):
+    """
+    Determine the closest related module for unclassified files.
+    """
+    if "blockchain" in file_path:
+        return "blockchain"
+    elif "did" in file_path:
+        return "did"
+    elif "tests" in file_path:
+        return "tests"
+    elif "api" in file_path:
+        return "api"
+    elif "system" in file_path:
+        return "system"
+    else:
+        return None
+
+
+def concatenate_code_files(source_dir, max_depth=3, extensions=None):
+    """
+    Concatenate code files from a directory into logically grouped smaller output files.
+    Each output includes the overall project structure, module overview, and content with context.
     """
     if extensions is None:
         extensions = [".py", ".rs", ".js", ".ts", ".c"]
 
-    # Remove the old output file if it exists
-    if os.path.exists(output_file):
-        os.remove(output_file)
-        print(f"Removed old output file: {output_file}")
+    output_dir = os.path.join(source_dir, "output")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    # Generate the tree structure
-    tree_str = tree_structure(source_dir, max_depth=max_depth)
+    # Generate the project structure overview
+    project_structure = tree_structure(source_dir, max_depth=max_depth)
 
-    # Prepare file content and summary as strings
-    content_str = ""
-    summary_str = "\n# File Summary:\n"
-
-    file_summary = []  # To store summary info for each file
+    module_contents = {}
 
     for root, dirs, files in os.walk(source_dir):
-        # Exclude irrelevant directories
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
 
-        # Skip any directory containing 'icn-docs' or 'docs' in its path
-        if "icn-docs" in root.split(os.path.sep) or "docs" in root.split(os.path.sep):
+        # Skip processing the output directory
+        if output_dir in root:
             continue
 
         for file in files:
-            # Skip excluded file types
             if any(file.endswith(ext) for ext in EXCLUDE_FILES):
                 continue
 
             file_path = os.path.join(root, file)
-
-            # Only include files with relevant extensions
             if not any(file.endswith(ext) for ext in extensions):
                 continue
 
-            try:
-                file_size = os.path.getsize(file_path)
+            module_name = get_closest_module(file_path)
 
-                with open(file_path, "rb") as binary_check:
-                    if b"\0" in binary_check.read(1024):
-                        file_summary.append((file_path, file_size, "Skipped (Binary)"))
-                        continue
+            if module_name:
+                if module_name not in module_contents:
+                    module_contents[module_name] = ""
 
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as infile:
-                    last_modified = time.ctime(os.path.getmtime(file_path))
-                    lang = file.split(".")[-1]
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as infile:
+                        code_content = infile.read()
+                        indented_content = "\n".join("    " + line for line in code_content.splitlines())
+                        content_block = f"\n# File: {file_path}\n\n```{file.split('.')[-1]}\n{indented_content}\n```\n"
+                        module_contents[module_name] += content_block
 
-                    # File metadata
-                    content_str += f"\n\n# {'='*60}\n"
-                    content_str += f"# File: {file_path}\n"
-                    content_str += f"# Size: {file_size} bytes\n"
-                    content_str += f"# Last Modified: {last_modified}\n"
-                    content_str += f"# Language: {lang}\n"
-                    content_str += f"# {'='*60}\n\n"
+                except Exception as e:
+                    print(f"Error reading {file_path}: {e}")
 
-                    # Syntax-highlighted code block
-                    content_str += f"```{lang}\n"
-                    file_content = infile.read()
-
-                    # Ensure consistent indentation for readability
-                    indented_content = "\n".join("    " + line for line in file_content.splitlines())
-                    content_str += indented_content
-                    content_str += "\n```\n"
-
-                    file_summary.append((file_path, file_size, "Included"))
-            except Exception as e:
-                print(f"Error reading {file_path}: {e}")
-                file_summary.append((file_path, "N/A", f"Error: {e}"))
-
-    # Construct the summary string
-    for file_info in file_summary:
-        summary_str += f"# {file_info[0]} - {file_info[1]} bytes - {file_info[2]}\n"
-
-    # Write everything to the output file
-    with open(output_file, "w", encoding="utf-8") as outfile:
-        outfile.write(summary_str + "\n\n")
-        outfile.write("# Project Directory Structure (up to depth {}):\n".format(max_depth))
-        outfile.write(tree_str)
-        outfile.write("\n\n# Code Files Concatenation:\n\n")
-        outfile.write(content_str)
-
-    print(f"Concatenation complete! Check the output file: {output_file}")
+    # Write each module's content to a separate file
+    for module_name, content_str in module_contents.items():
+        if content_str:  # Only create files for non-empty modules
+            create_output_file(output_dir, module_name, project_structure, content_str)
 
 
 # Example usage
-concatenate_code_files("/home/matt/icn-prototype", "ICN_code_dump.txt", max_depth=3)
+concatenate_code_files("/home/matt/icn-prototype", max_depth=3)

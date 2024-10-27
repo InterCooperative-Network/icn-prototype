@@ -1,9 +1,7 @@
 """
-Consensus mechanism components.
+blockchain/consensus/__init__.py
 
-This module serves as the entry point for the various consensus mechanisms 
-implemented within the blockchain's consensus layer, specifically focusing on 
-the Proof of Cooperation (PoC) consensus mechanism.
+Export consensus mechanism components.
 """
 
 from .proof_of_cooperation import ProofOfCooperation

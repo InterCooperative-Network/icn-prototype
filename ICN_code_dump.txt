@@ -65,14 +65,14 @@
 # /home/matt/icn-prototype/blockchain/contracts/smart_contract.py - 14617 bytes - Included
 # /home/matt/icn-prototype/blockchain/contracts/__init__.py - 207 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation.py - 27497 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/__init__.py - 159 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py - 9628 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py - 14712 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py - 5237 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/types.py - 7904 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py - 5583 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py - 5580 bytes - Included
-# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py - 6184 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/__init__.py - 336 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py - 10069 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py - 16196 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py - 7980 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/types.py - 11674 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py - 7466 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py - 8036 bytes - Included
+# /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py - 6715 bytes - Included
 # /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/__init__.py - 0 bytes - Included
 
 
@@ -10029,7 +10029,7 @@ icn-prototype/
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/network/sync/sync_manager.py
 # Size: 29290 bytes
-# Last Modified: Sat Oct 26 22:39:02 2024
+# Last Modified: Sat Oct 26 22:58:44 2024
 # Language: py
 # ============================================================
 
@@ -16145,14 +16145,20 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/__init__.py
-# Size: 159 bytes
-# Last Modified: Sat Oct 26 14:10:55 2024
+# Size: 336 bytes
+# Last Modified: Sat Oct 26 23:41:27 2024
 # Language: py
 # ============================================================
 
 ```py
-    # blockchain/consensus/__init__.py
-    """Consensus mechanism components."""
+    """
+    Consensus mechanism components.
+    
+    This module serves as the entry point for the various consensus mechanisms 
+    implemented within the blockchain's consensus layer, specifically focusing on 
+    the Proof of Cooperation (PoC) consensus mechanism.
+    """
+    
     from .proof_of_cooperation import ProofOfCooperation
     
     __all__ = ["ProofOfCooperation"]
@@ -16161,13 +16167,21 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py
-# Size: 9628 bytes
-# Last Modified: Sat Oct 26 14:13:32 2024
+# Size: 10069 bytes
+# Last Modified: Sat Oct 26 23:37:48 2024
 # Language: py
 # ============================================================
 
 ```py
-    # blockchain/consensus/proof_of_cooperation/metrics_manager.py
+    """
+    metrics_manager.py
+    
+    This module manages performance metrics and statistics for the Proof of Cooperation (PoC) consensus mechanism.
+    It tracks validation success rates, block times, collusion detections, and other performance indicators.
+    
+    Classes:
+        MetricsManager
+    """
     
     import logging
     from typing import Dict, Optional, Any
@@ -16193,40 +16207,24 @@ icn-prototype/
             Record the result of a validation attempt.
     
             Args:
-                result: The validation result
-                validator_id: ID of the validator
-                shard_id: Optional shard ID where validation occurred
+                result (ValidationResult): The validation result.
+                validator_id (str): ID of the validator.
+                shard_id (Optional[int]): Optional shard ID where validation occurred.
             """
             try:
                 self.metrics.total_validations += 1
-                
+    
                 if result.success:
                     self.metrics.successful_validations += 1
                 else:
                     self.metrics.failed_validations += 1
     
                 # Track per-validator metrics
-                if validator_id not in self.metrics.validator_counts:
-                    self.metrics.validator_counts[validator_id] = 0
-                self.metrics.validator_counts[validator_id] += 1
+                self.metrics.validator_counts[validator_id] = self.metrics.validator_counts.get(validator_id, 0) + 1
     
                 # Track shard-specific metrics if applicable
                 if shard_id is not None:
-                    if shard_id not in self.metrics.shard_metrics:
-                        self.metrics.shard_metrics[shard_id] = {
-                            "validations": 0,
-                            "successful": 0,
-                            "failed": 0,
-                            "unique_validators": set()
-                        }
-                    
-                    shard_metrics = self.metrics.shard_metrics[shard_id]
-                    shard_metrics["validations"] += 1
-                    if result.success:
-                        shard_metrics["successful"] += 1
-                    else:
-                        shard_metrics["failed"] += 1
-                    shard_metrics["unique_validators"].add(validator_id)
+                    self._update_shard_metrics(result, validator_id, shard_id)
     
                 # Add any custom metrics from the validation result
                 self._update_custom_metrics(result.metrics)
@@ -16234,17 +16232,44 @@ icn-prototype/
             except Exception as e:
                 logger.error(f"Failed to record validation metrics: {str(e)}")
     
+        def _update_shard_metrics(self, result: ValidationResult, validator_id: str, shard_id: int) -> None:
+            """
+            Update shard-specific metrics.
+    
+            Args:
+                result (ValidationResult): The validation result.
+                validator_id (str): ID of the validator.
+                shard_id (int): ID of the shard.
+            """
+            if shard_id not in self.metrics.shard_metrics:
+                self.metrics.shard_metrics[shard_id] = {
+                    "validations": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "unique_validators": set()
+                }
+    
+            shard_metrics = self.metrics.shard_metrics[shard_id]
+            shard_metrics["validations"] += 1
+    
+            if result.success:
+                shard_metrics["successful"] += 1
+            else:
+                shard_metrics["failed"] += 1
+    
+            shard_metrics["unique_validators"].add(validator_id)
+    
         def record_block_time(self, block_time: float) -> None:
             """
             Record the time taken to create a block.
     
             Args:
-                block_time: Time in seconds to create the block
+                block_time (float): Time in seconds to create the block.
             """
             try:
                 current_avg = self.metrics.average_block_time
                 total_blocks = self.metrics.total_blocks_validated
-                
+    
                 # Update running average
                 self.metrics.average_block_time = (
                     (current_avg * total_blocks + block_time) / (total_blocks + 1)
@@ -16267,10 +16292,10 @@ icn-prototype/
             Get performance metrics for a specific validator.
     
             Args:
-                validator_id: ID of the validator
+                validator_id (str): ID of the validator.
     
             Returns:
-                Dict containing validator's performance metrics
+                Dict[str, Any]: Validator's performance metrics.
             """
             try:
                 total_validations = self.metrics.validator_counts.get(validator_id, 0)
@@ -16281,19 +16306,19 @@ icn-prototype/
                         "shard_participation": {}
                     }
     
-                # Calculate success rate for this validator
                 validator_successes = sum(
-                    1 for s in self.metrics.shard_metrics.values()
-                    if validator_id in s["unique_validators"] and s["successful"] > 0
+                    1 for shard in self.metrics.shard_metrics.values()
+                    if validator_id in shard["unique_validators"] and shard["successful"] > 0
                 )
                 success_rate = validator_successes / total_validations
     
-                # Calculate shard participation
                 shard_participation = {
                     shard_id: {
                         "validations": metrics["validations"],
-                        "success_rate": metrics["successful"] / metrics["validations"]
-                        if metrics["validations"] > 0 else 0.0
+                        "success_rate": (
+                            metrics["successful"] / metrics["validations"]
+                            if metrics["validations"] > 0 else 0.0
+                        )
                     }
                     for shard_id, metrics in self.metrics.shard_metrics.items()
                     if validator_id in metrics["unique_validators"]
@@ -16314,10 +16339,10 @@ icn-prototype/
             Get metrics for a specific shard.
     
             Args:
-                shard_id: ID of the shard
+                shard_id (int): ID of the shard.
     
             Returns:
-                Dict containing shard metrics
+                Dict[str, Any]: Shard metrics.
             """
             try:
                 if shard_id not in self.metrics.shard_metrics:
@@ -16331,7 +16356,7 @@ icn-prototype/
     
                 metrics = self.metrics.shard_metrics[shard_id]
                 total = metrics["validations"]
-                
+    
                 return {
                     "validations": total,
                     "successful": metrics["successful"],
@@ -16349,7 +16374,7 @@ icn-prototype/
             Get all consensus metrics.
     
             Returns:
-                Dict containing all metrics
+                Dict[str, Any]: All metrics.
             """
             try:
                 total_validations = self.metrics.total_validations
@@ -16358,7 +16383,7 @@ icn-prototype/
                     "successful_validations": self.metrics.successful_validations,
                     "failed_validations": self.metrics.failed_validations,
                     "success_rate": (
-                        self.metrics.successful_validations / total_validations 
+                        self.metrics.successful_validations / total_validations
                         if total_validations > 0 else 0.0
                     ),
                     "average_block_time": self.metrics.average_block_time,
@@ -16381,7 +16406,7 @@ icn-prototype/
             Update metrics with custom values from validation results.
     
             Args:
-                custom_metrics: Dictionary of custom metrics to update
+                custom_metrics (Dict[str, Any]): Dictionary of custom metrics to update.
             """
             try:
                 for key, value in custom_metrics.items():
@@ -16424,15 +16449,24 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/reputation_manager.py
-# Size: 14712 bytes
-# Last Modified: Sat Oct 26 14:14:19 2024
+# Size: 16196 bytes
+# Last Modified: Sat Oct 26 23:39:11 2024
 # Language: py
 # ============================================================
 
 ```py
-    # blockchain/consensus/proof_of_cooperation/reputation_manager.py
+    """
+    reputation_manager.py
     
-    from typing import Dict, List, Optional, Set, Any
+    This module manages reputation scoring and calculations for the Proof of Cooperation (PoC) consensus mechanism.
+    It handles all aspects of node reputation, including score calculation, decay, validation eligibility, 
+    and updates to validation statistics.
+    
+    Classes:
+        ReputationManager
+    """
+    
+    from typing import Dict, List, Optional, Any
     from datetime import datetime, timedelta
     import logging
     import math
@@ -16444,7 +16478,7 @@ icn-prototype/
     class ReputationManager:
         """
         Manages reputation scoring and calculations for the consensus mechanism.
-        Handles all aspects of node reputation including score calculation,
+        Handles all aspects of node reputation, including score calculation,
         decay, and validation eligibility.
         """
     
@@ -16453,7 +16487,7 @@ icn-prototype/
             Initialize the reputation manager.
     
             Args:
-                config: The consensus configuration parameters
+                config (ConsensusConfig): The consensus configuration parameters.
             """
             self.config = config
             self.node_stats: Dict[str, ValidationStats] = {}
@@ -16463,18 +16497,20 @@ icn-prototype/
     
         def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
             """
-            Calculate a node's cooperation score with all factors.
+            Calculate a node's cooperation score, considering various factors like diversity,
+            consistency, performance, shard-specific behavior, and time decay.
     
             Args:
-                node: The node to calculate score for
-                shard_id: Optional shard ID for shard-specific scoring
+                node (Node): The node to calculate the score for.
+                shard_id (Optional[int]): Optional shard ID for shard-specific scoring.
     
             Returns:
-                float: The calculated cooperation score
+                float: The calculated cooperation score, adjusted by multiple factors.
             """
             try:
-                # Check cache first
                 cache_key = f"{node.node_id}:{shard_id or 'all'}"
+                
+                # Return cached score if it is still valid
                 if cache_key in self.score_cache:
                     cache_time = self.last_score_update.get(cache_key)
                     if cache_time and datetime.now() - cache_time < self.cache_duration:
@@ -16486,18 +16522,17 @@ icn-prototype/
                     for category, score in node.reputation_scores.items()
                 )
     
-                # Calculate modifying factors
+                # Calculate additional factors
                 factors = [
                     self._calculate_diversity_factor(node),
                     self._calculate_consistency_factor(node),
                     self._calculate_performance_factor(node)
                 ]
     
-                # Add shard-specific factor if applicable
                 if shard_id is not None:
                     factors.append(self._calculate_shard_factor(node, shard_id))
     
-                # Apply all factors
+                # Apply factors to base score
                 final_score = base_score
                 for factor in factors:
                     final_score *= factor
@@ -16506,7 +16541,7 @@ icn-prototype/
                 time_factor = self._calculate_time_decay(node)
                 final_score *= time_factor
     
-                # Cache result
+                # Cache the calculated score
                 self.score_cache[cache_key] = final_score
                 self.last_score_update[cache_key] = datetime.now()
     
@@ -16518,31 +16553,33 @@ icn-prototype/
     
         def _calculate_diversity_factor(self, node: Node) -> float:
             """
-            Calculate diversity factor based on cooperative interactions.
+            Calculate a diversity factor based on a node's cooperative interactions. 
+            It evaluates the variety of cooperatives the node interacts with, 
+            favoring nodes that engage with diverse cooperatives.
     
             Args:
-                node: The node to calculate factor for
+                node (Node): The node to calculate the diversity factor for.
     
             Returns:
-                float: The calculated diversity factor
+                float: The calculated diversity factor.
             """
             try:
                 recent_interactions = node.cooperative_interactions[-100:]
                 if not recent_interactions:
                     return 1.0
     
-                # Calculate unique interaction ratio
+                # Calculate the ratio of unique interactions to total interactions
                 unique_coops = len(set(recent_interactions))
                 total_interactions = len(recent_interactions)
                 diversity_score = unique_coops / total_interactions
     
-                # Progressive scaling based on experience
+                # Scale diversity factor based on total interactions
                 if total_interactions >= 20:
                     if unique_coops >= 5:
                         return 1.0 + math.log(1 + diversity_score) * 1.5
                     return 1.0 + math.log(1 + diversity_score)
     
-                return max(0.7, diversity_score)  # Minimum baseline for new nodes
+                return max(0.7, diversity_score)  # Minimum baseline for newer nodes
     
             except Exception as e:
                 logger.error(f"Error calculating diversity factor: {str(e)}")
@@ -16550,13 +16587,14 @@ icn-prototype/
     
         def _calculate_consistency_factor(self, node: Node) -> float:
             """
-            Calculate consistency factor based on validation history.
+            Calculate a consistency factor based on the node's validation history.
+            This factor rewards consistent performance over time.
     
             Args:
-                node: The node to calculate factor for
+                node (Node): The node to calculate the consistency factor for.
     
             Returns:
-                float: The calculated consistency factor
+                float: The calculated consistency factor.
             """
             try:
                 if not node.validation_history:
@@ -16569,15 +16607,15 @@ icn-prototype/
                 )
                 success_rate = successful / len(recent_validations)
     
-                # Progressive scaling based on experience
+                # Determine minimum success rate threshold based on experience
                 if node.total_validations < 10:
                     min_rate = self.config.validation_thresholds["min_success_rate"] * 0.8
                 else:
                     min_rate = self.config.validation_thresholds["min_success_rate"]
     
-                if success_rate > 0.95:  # Exceptional performance
+                if success_rate > 0.95:
                     return 1.8
-                elif success_rate > 0.8:  # Strong performance
+                elif success_rate > 0.8:
                     return 1.5
                 elif success_rate > min_rate:
                     return 1.0 + ((success_rate - min_rate) / (1 - min_rate))
@@ -16590,20 +16628,21 @@ icn-prototype/
     
         def _calculate_performance_factor(self, node: Node) -> float:
             """
-            Calculate performance factor based on node metrics.
+            Calculate a performance factor based on node metrics such as availability, 
+            validation success rate, and network reliability.
     
             Args:
-                node: The node to calculate factor for
+                node (Node): The node to calculate the performance factor for.
     
             Returns:
-                float: The calculated performance factor
+                float: The calculated performance factor.
             """
             try:
                 metrics = node.performance_metrics
                 if not metrics:
                     return 1.0
     
-                # Weighted performance metrics
+                # Apply weighted performance metrics
                 weights = {
                     "availability": 0.35,
                     "validation_success_rate": 0.35,
@@ -16615,7 +16654,6 @@ icn-prototype/
                     for metric, weight in weights.items()
                 )
     
-                # Apply bonuses for exceptional performance
                 if weighted_sum > 0.95:
                     return weighted_sum * 1.2
                 elif weighted_sum > 0.9:
@@ -16632,39 +16670,34 @@ icn-prototype/
     
         def _calculate_shard_factor(self, node: Node, shard_id: int) -> float:
             """
-            Calculate shard-specific factor.
+            Calculate a shard-specific factor that rewards experience and performance within a shard.
     
             Args:
-                node: The node to calculate factor for
-                shard_id: The shard ID to calculate factor for
+                node (Node): The node to calculate the shard factor for.
+                shard_id (int): The shard ID to calculate the factor for.
     
             Returns:
-                float: The calculated shard factor
+                float: The calculated shard factor.
             """
             try:
                 if shard_id not in node.active_shards:
                     return 0.0
     
-                # Calculate time-based experience
-                time_in_shard = (
-                    datetime.now() - node.active_shards[shard_id]
-                ).total_seconds()
+                time_in_shard = (datetime.now() - node.active_shards[shard_id]).total_seconds()
                 experience = min(1.0, time_in_shard / (24 * 3600))
     
-                # Get shard-specific success rate
                 stats = self.node_stats.get(node.node_id, ValidationStats())
                 shard_stats = stats.shard_validations.get(shard_id, {})
-                
+    
                 if shard_stats:
                     success_rate = (
                         shard_stats.get("successful", 0) /
                         max(1, shard_stats.get("selections", 1))
                     )
                 else:
-                    success_rate = 1.0  # New to shard
+                    success_rate = 1.0
     
-                # Progressive weighting
-                if experience < 0.2:  # New to shard
+                if experience < 0.2:
                     return 0.7 + (0.3 * success_rate)
                 else:
                     return 0.4 + (0.3 * experience) + (0.3 * success_rate)
@@ -16675,25 +16708,24 @@ icn-prototype/
     
         def _calculate_time_decay(self, node: Node) -> float:
             """
-            Calculate time-based decay factor.
+            Calculate a time-based decay factor that reduces the score of inactive nodes over time.
     
             Args:
-                node: The node to calculate decay for
+                node (Node): The node to calculate the time decay for.
     
             Returns:
-                float: The calculated decay factor
+                float: The calculated time decay factor.
             """
             try:
                 stats = self.node_stats.get(node.node_id)
                 if not stats or not stats.last_validation:
                     return 1.0
     
-                hours_inactive = (
-                    datetime.now() - stats.last_validation
-                ).total_seconds() / 3600
+                hours_inactive = (datetime.now() - stats.last_validation).total_seconds() / 3600
     
                 if hours_inactive > 24:
                     return math.exp(-hours_inactive / 24)
+    
                 return 1.0
     
             except Exception as e:
@@ -16702,14 +16734,15 @@ icn-prototype/
     
         def can_validate(self, node: Node, shard_id: Optional[int] = None) -> bool:
             """
-            Check if a node can participate in validation.
+            Determine if a node is eligible to participate in validation, considering reputation,
+            validation history, and specific shard requirements.
     
             Args:
-                node: The node to check
-                shard_id: Optional shard ID for shard-specific validation
+                node (Node): The node to check eligibility for.
+                shard_id (Optional[int]): Optional shard ID for shard-specific validation.
     
             Returns:
-                bool: True if node can validate
+                bool: True if the node is eligible for validation, False otherwise.
             """
             try:
                 # Handle new nodes
@@ -16721,15 +16754,15 @@ icn-prototype/
                         self.config.validation_thresholds["new_node_reputation_factor"]
                     )
     
-                # Standard checks
+                # Standard validation checks
                 if not node.can_validate(shard_id):
                     return False
     
-                # Check reputation requirement
+                # Calculate reputation requirement
                 total_reputation = node.get_total_reputation()
                 reputation_requirement = self.config.min_reputation
     
-                # Scale requirements with experience
+                # Adjust reputation requirement based on experience
                 if node.total_validations > 20:
                     reputation_requirement *= 1.2
                 elif node.total_validations > 10:
@@ -16743,12 +16776,11 @@ icn-prototype/
                 # Check recent performance
                 stats = self.node_stats.get(node.node_id, ValidationStats())
                 if stats.selections > 0:
-                    recent_success = (
-                        stats.successful_validations / stats.selections
-                    )
-                    if (recent_success < 
-                        self.config.validation_thresholds["min_success_rate"] and
-                        node.total_validations > 10):
+                    recent_success_rate = stats.successful_validations / stats.selections
+                    if (
+                        recent_success_rate < self.config.validation_thresholds["min_success_rate"] and
+                        node.total_validations > 10
+                    ):
                         return False
     
                 return True
@@ -16759,12 +16791,12 @@ icn-prototype/
     
         def update_stats(self, node_id: str, result: ValidationResult, shard_id: Optional[int] = None) -> None:
             """
-            Update validation statistics for a node.
+            Update validation statistics for a node based on the result of a validation attempt.
     
             Args:
-                node_id: ID of the node
-                result: The validation result
-                shard_id: Optional shard ID where validation occurred
+                node_id (str): ID of the node to update.
+                result (ValidationResult): The validation result.
+                shard_id (Optional[int]): Optional shard ID where validation occurred.
             """
             try:
                 if node_id not in self.node_stats:
@@ -16797,18 +16829,23 @@ icn-prototype/
     
         def get_node_stats(self, node_id: str) -> Optional[ValidationStats]:
             """
-            Get validation statistics for a node.
+            Retrieve validation statistics for a node.
     
             Args:
-                node_id: ID of the node
+                node_id (str): ID of the node to retrieve statistics for.
     
             Returns:
-                Optional[ValidationStats]: The node's validation stats if found
+                Optional[ValidationStats]: The node's validation stats if found, None otherwise.
             """
             return self.node_stats.get(node_id)
     
         def to_dict(self) -> Dict[str, Any]:
-            """Convert reputation manager state to dictionary."""
+            """
+            Convert the reputation manager's state to a dictionary for serialization.
+    
+            Returns:
+                Dict[str, Any]: Dictionary representation of the reputation manager's state.
+            """
             return {
                 "node_stats": {
                     node_id: {
@@ -16829,7 +16866,16 @@ icn-prototype/
     
         @classmethod
         def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig) -> 'ReputationManager':
-            """Create reputation manager from dictionary data."""
+            """
+            Create a reputation manager instance from a dictionary of data.
+    
+            Args:
+                data (Dict[str, Any]): The dictionary data to initialize from.
+                config (ConsensusConfig): The consensus configuration parameters.
+    
+            Returns:
+                ReputationManager: A new instance of ReputationManager.
+            """
             manager = cls(config)
     
             # Restore node stats
@@ -16839,13 +16885,11 @@ icn-prototype/
                 stats.successful_validations = stats_data["successful_validations"]
                 stats.consecutive_failures = stats_data["consecutive_failures"]
                 if stats_data["last_validation"]:
-                    stats.last_validation = datetime.fromisoformat(
-                        stats_data["last_validation"]
-                    )
+                    stats.last_validation = datetime.fromisoformat(stats_data["last_validation"])
                 stats.shard_validations = stats_data["shard_validations"]
                 manager.node_stats[node_id] = stats
     
-            # Restore cache
+            # Restore score cache and update times
             manager.score_cache = data["score_cache"]
             manager.last_score_update = {
                 k: datetime.fromisoformat(v)
@@ -16858,8 +16902,8 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/validator_manager.py
-# Size: 5237 bytes
-# Last Modified: Sat Oct 26 18:33:40 2024
+# Size: 7980 bytes
+# Last Modified: Sat Oct 26 23:41:09 2024
 # Language: py
 # ============================================================
 
@@ -16899,7 +16943,7 @@ icn-prototype/
             """
             self.min_reputation = min_reputation
             self.cooldown_blocks = cooldown_blocks
-            self.validator_history = []  # Stores tuples of (validator_id, timestamp, shard_id)
+            self.validator_history: List[tuple] = []  # Stores tuples of (validator_id, timestamp, shard_id)
     
         def select_validator(self, nodes: List[Node], shard_id: Optional[int] = None) -> Optional[Node]:
             """
@@ -16909,20 +16953,20 @@ icn-prototype/
             - Node must have reputation above the minimum threshold.
             - Node must not be in cooldown.
             - Node must be able to validate the specified shard, if shard_id is provided.
-            - Nodes with higher reputation and more cooperative interactions are prioritized.
+            - Nodes with higher reputation, cooperative interactions, and better performance are prioritized.
     
             Args:
                 nodes (List[Node]): List of nodes to select from.
                 shard_id (Optional[int]): Shard ID for which a validator is needed.
             
             Returns:
-                Optional[Node]: The selected validator node, or None if no eligible validator found.
+                Optional[Node]: The selected validator node, or None if no eligible validator is found.
             """
             eligible_nodes = [node for node in nodes if self._is_eligible(node, shard_id)]
             if not eligible_nodes:
                 return None
     
-            # Sort by reputation, cooperative interactions, and performance metrics
+            # Sort nodes by priority score
             eligible_nodes.sort(key=self._calculate_priority_score, reverse=True)
     
             # Select the top candidate
@@ -16940,14 +16984,20 @@ icn-prototype/
                 shard_id (Optional[int]): Shard ID to validate eligibility against.
     
             Returns:
-                bool: True if node is eligible, False otherwise.
+                bool: True if the node is eligible, False otherwise.
             """
+            # Check if node's reputation meets the minimum requirement
             if node.reputation < self.min_reputation:
                 return False
+    
+            # Check if node is in cooldown
             if node.cooldown > 0:
                 return False
+    
+            # Check if node can validate the specified shard
             if shard_id is not None and not node.can_validate(shard_id):
                 return False
+    
             return True
     
         def _calculate_priority_score(self, node: Node) -> float:
@@ -16965,6 +17015,7 @@ icn-prototype/
             Returns:
                 float: Calculated priority score.
             """
+            # Weights for different factors in the priority score calculation
             reputation_weight = 0.6
             interaction_weight = 0.2
             performance_weight = 0.2
@@ -17000,18 +17051,97 @@ icn-prototype/
             """
             node.cooldown = 0
             node.reset_performance_metrics()
+    
+        def get_validator_history(self, limit: int = 100) -> List[tuple]:
+            """
+            Retrieve the recent history of validators, useful for auditing and analysis.
+    
+            Args:
+                limit (int): Maximum number of records to return (default is 100).
+    
+            Returns:
+                List[tuple]: A list of tuples containing validator history records.
+            """
+            return self.validator_history[-limit:]
+    
+        def update_validator_reputation(self, node: Node, reputation_delta: float) -> None:
+            """
+            Update the reputation of a validator node by a specified amount.
+    
+            Args:
+                node (Node): The validator node to update.
+                reputation_delta (float): The amount to add or subtract from the node's reputation.
+            """
+            node.reputation += reputation_delta
+            node.reputation = max(0.0, node.reputation)  # Ensure reputation does not fall below zero
+    
+        def enforce_cooldown(self, node: Node) -> None:
+            """
+            Enforce cooldown for a validator node after a validation cycle.
+    
+            This method increases the cooldown period for the node to prevent consecutive validations.
+    
+            Args:
+                node (Node): The validator node to enforce cooldown on.
+            """
+            node.cooldown = self.cooldown_blocks
+    
+        def release_cooldown(self) -> None:
+            """
+            Release cooldowns for all validators that have completed their cooldown period.
+    
+            This method iterates through nodes and decreases their cooldown by one block,
+            allowing them to rejoin validation once their cooldown reaches zero.
+            """
+            for node in self._get_all_nodes():
+                if node.cooldown > 0:
+                    node.cooldown -= 1
+    
+        def _get_all_nodes(self) -> List[Node]:
+            """
+            Placeholder method to retrieve all nodes in the network.
+    
+            This method should be replaced with actual logic to fetch nodes from the broader PoC network.
+    
+            Returns:
+                List[Node]: List of all nodes (currently returns an empty list).
+            """
+            # Replace this placeholder with actual retrieval logic in the PoC network
+            return []
+    
+        def get_active_validators(self) -> List[str]:
+            """
+            Retrieve a list of active validators based on their current state.
+    
+            Returns:
+                List[str]: A list of node IDs representing active validators.
+            """
+            return [record[0] for record in self.validator_history if record[1] > datetime.now() - timedelta(hours=1)]
 ```
 
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/types.py
-# Size: 7904 bytes
-# Last Modified: Sat Oct 26 14:11:33 2024
+# Size: 11674 bytes
+# Last Modified: Sat Oct 26 23:40:04 2024
 # Language: py
 # ============================================================
 
 ```py
-    # blockchain/consensus/proof_of_cooperation/types.py
+    """
+    types.py
+    
+    This module defines data structures and types used within the Proof of Cooperation (PoC) consensus mechanism.
+    It includes configuration settings, validation results, metrics tracking, and the overall state of the consensus.
+    
+    Classes:
+        ConsensusConfig
+        ValidationResult
+        ValidatorHistory
+        ValidationStats
+        ConsensusMetrics
+        ConsensusState
+    """
     
     from dataclasses import dataclass, field
     from typing import Dict, List, Optional, Set, Any
@@ -17019,7 +17149,17 @@ icn-prototype/
     
     @dataclass
     class ConsensusConfig:
-        """Configuration parameters for the consensus mechanism."""
+        """
+        Configuration parameters for the PoC consensus mechanism.
+    
+        Attributes:
+            min_reputation (float): Minimum reputation required for validation eligibility.
+            cooldown_blocks (int): Number of blocks a validator must wait during cooldown.
+            reputation_decay_factor (float): Rate at which reputation decays over time.
+            collusion_threshold (float): Threshold for detecting collusion among validators.
+            reputation_weights (Dict[str, float]): Weights for different reputation categories.
+            validation_thresholds (Dict[str, float]): Thresholds for validation metrics.
+        """
         min_reputation: float = 10.0
         cooldown_blocks: int = 3
         reputation_decay_factor: float = 0.95
@@ -17049,14 +17189,30 @@ icn-prototype/
     
     @dataclass
     class ValidationResult:
-        """Result of a validation operation."""
+        """
+        Represents the result of a validation operation.
+    
+        Attributes:
+            success (bool): Indicates whether the validation was successful.
+            reason (Optional[str]): Reason for failure, if applicable.
+            metrics (Dict[str, Any]): Additional metrics related to the validation.
+        """
         success: bool
         reason: Optional[str] = None
         metrics: Dict[str, Any] = field(default_factory=dict)
     
     @dataclass
     class ValidatorHistory:
-        """Record of validator activity."""
+        """
+        Tracks the activity of a validator within the PoC network.
+    
+        Attributes:
+            node_id (str): Identifier of the validator node.
+            timestamp (datetime): Time of the validation event.
+            shard_id (Optional[int]): Shard ID where validation occurred.
+            success (bool): Indicates whether the validation was successful.
+            metrics (Dict[str, Any]): Additional metrics related to the validation event.
+        """
         node_id: str
         timestamp: datetime
         shard_id: Optional[int]
@@ -17065,7 +17221,16 @@ icn-prototype/
     
     @dataclass
     class ValidationStats:
-        """Statistics for validation performance."""
+        """
+        Tracks validation statistics for individual nodes.
+    
+        Attributes:
+            selections (int): Number of times the node was selected for validation.
+            successful_validations (int): Number of successful validations.
+            consecutive_failures (int): Number of consecutive failed validations.
+            last_validation (Optional[datetime]): Timestamp of the last validation.
+            shard_validations (Dict[int, Dict[str, Any]]): Shard-specific validation metrics.
+        """
         selections: int = 0
         successful_validations: int = 0
         consecutive_failures: int = 0
@@ -17074,7 +17239,20 @@ icn-prototype/
     
     @dataclass
     class ConsensusMetrics:
-        """Metrics tracking for consensus operations."""
+        """
+        Tracks metrics related to the PoC consensus mechanism.
+    
+        Attributes:
+            total_validations (int): Total number of validations performed.
+            successful_validations (int): Total number of successful validations.
+            failed_validations (int): Total number of failed validations.
+            collusion_detections (int): Number of detected collusion events.
+            total_blocks_validated (int): Total number of blocks validated.
+            new_node_participations (int): Number of participations by new nodes.
+            average_block_time (float): Average time taken to validate blocks.
+            validator_counts (Dict[str, int]): Number of validations per validator.
+            shard_metrics (Dict[int, Dict[str, Any]]): Shard-specific metrics.
+        """
         total_validations: int = 0
         successful_validations: int = 0
         failed_validations: int = 0
@@ -17086,7 +17264,12 @@ icn-prototype/
         shard_metrics: Dict[int, Dict[str, Any]] = field(default_factory=dict)
     
         def to_dict(self) -> Dict[str, Any]:
-            """Convert metrics to dictionary format."""
+            """
+            Convert metrics to dictionary format.
+    
+            Returns:
+                Dict[str, Any]: Dictionary representation of the metrics.
+            """
             return {
                 "total_validations": self.total_validations,
                 "successful_validations": self.successful_validations,
@@ -17104,7 +17287,15 @@ icn-prototype/
     
         @classmethod
         def from_dict(cls, data: Dict[str, Any]) -> 'ConsensusMetrics':
-            """Create metrics from dictionary data."""
+            """
+            Create ConsensusMetrics from dictionary data.
+    
+            Args:
+                data (Dict[str, Any]): Dictionary containing metrics data.
+    
+            Returns:
+                ConsensusMetrics: An instance of ConsensusMetrics populated with the provided data.
+            """
             metrics = cls()
             metrics.total_validations = data.get("total_validations", 0)
             metrics.successful_validations = data.get("successful_validations", 0)
@@ -17119,15 +17310,29 @@ icn-prototype/
     
     @dataclass
     class ConsensusState:
-        """Current state of the consensus mechanism."""
+        """
+        Represents the current state of the PoC consensus mechanism.
+    
+        Attributes:
+            config (ConsensusConfig): Configuration parameters of the consensus.
+            metrics (ConsensusMetrics): Metrics tracking consensus operations.
+            validator_history (List[ValidatorHistory]): History of validator activities.
+            validation_stats (Dict[str, ValidationStats]): Validation statistics by node.
+            active_validators (Set[str]): Set of currently active validators.
+        """
         config: ConsensusConfig
         metrics: ConsensusMetrics = field(default_factory=ConsensusMetrics)
         validator_history: List[ValidatorHistory] = field(default_factory=list)
         validation_stats: Dict[str, ValidationStats] = field(default_factory=dict)
         active_validators: Set[str] = field(default_factory=set)
-        
+    
         def to_dict(self) -> Dict[str, Any]:
-            """Convert state to dictionary format."""
+            """
+            Convert state to dictionary format.
+    
+            Returns:
+                Dict[str, Any]: Dictionary representation of the consensus state.
+            """
             return {
                 "config": {
                     "min_reputation": self.config.min_reputation,
@@ -17163,7 +17368,15 @@ icn-prototype/
     
         @classmethod
         def from_dict(cls, data: Dict[str, Any]) -> 'ConsensusState':
-            """Create state from dictionary data."""
+            """
+            Create ConsensusState from dictionary data.
+    
+            Args:
+                data (Dict[str, Any]): Dictionary containing consensus state data.
+    
+            Returns:
+                ConsensusState: An instance of ConsensusState populated with the provided data.
+            """
             config = ConsensusConfig(
                 min_reputation=data["config"]["min_reputation"],
                 cooldown_blocks=data["config"]["cooldown_blocks"],
@@ -17172,9 +17385,9 @@ icn-prototype/
             )
             config.reputation_weights = data["config"]["reputation_weights"].copy()
             config.validation_thresholds = data["config"]["validation_thresholds"].copy()
-            
+    
             metrics = ConsensusMetrics.from_dict(data["metrics"])
-            
+    
             validator_history = [
                 ValidatorHistory(
                     node_id=h["node_id"],
@@ -17185,7 +17398,7 @@ icn-prototype/
                 )
                 for h in data["validator_history"]
             ]
-            
+    
             validation_stats = {
                 node_id: ValidationStats(
                     selections=stats["selections"],
@@ -17196,9 +17409,9 @@ icn-prototype/
                 )
                 for node_id, stats in data["validation_stats"].items()
             }
-            
+    
             active_validators = set(data["active_validators"])
-            
+    
             return cls(
                 config=config,
                 metrics=metrics,
@@ -17211,8 +17424,8 @@ icn-prototype/
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/collusion_detector.py
-# Size: 5583 bytes
-# Last Modified: Sat Oct 26 18:34:14 2024
+# Size: 7466 bytes
+# Last Modified: Sat Oct 26 23:35:27 2024
 # Language: py
 # ============================================================
 
@@ -17228,6 +17441,7 @@ icn-prototype/
     """
     
     from typing import List, Dict, Tuple
+    from datetime import datetime
     from .types import Node, Transaction, Block
     
     class CollusionDetector:
@@ -17240,7 +17454,7 @@ icn-prototype/
         - Monitoring validator interactions and decisions for signs of collusion.
         - Utilizing historical data to identify anomalous patterns that could indicate fraud.
         """
-    
+        
         def __init__(self, transaction_threshold: int = 10, validator_threshold: int = 3):
             """
             Initialize the CollusionDetector with detection thresholds.
@@ -17251,7 +17465,8 @@ icn-prototype/
             """
             self.transaction_threshold = transaction_threshold
             self.validator_threshold = validator_threshold
-            self.suspicious_transactions = []  # Stores potentially collusive transactions
+            self.suspicious_transactions: List[Transaction] = []  # Stores potentially collusive transactions
+            self.suspicious_validators: Dict[str, int] = {}  # Track suspicious validator behavior
     
         def detect_collusion(self, validator: Node, block: Block) -> bool:
             """
@@ -17270,12 +17485,13 @@ icn-prototype/
                 bool: True if collusion is detected, False otherwise.
             """
             # Analyze transaction patterns
-            if self._check_transaction_patterns(block.transactions):
-                self._mark_validator_as_suspicious(validator)
-                return True
+            transactions_suspicious = self._check_transaction_patterns(block.transactions)
     
             # Analyze validator interactions
-            if self._check_validator_interactions(validator):
+            interactions_suspicious = self._check_validator_interactions(validator)
+    
+            # Mark validator as suspicious if any collusion criteria are met
+            if transactions_suspicious or interactions_suspicious:
                 self._mark_validator_as_suspicious(validator)
                 return True
     
@@ -17295,12 +17511,13 @@ icn-prototype/
             Returns:
                 bool: True if suspicious patterns are found, False otherwise.
             """
-            transaction_count = {}  # Maps (sender, receiver) pairs to transaction counts
+            transaction_count: Dict[Tuple[str, str], int] = {}  # Maps (sender, receiver) pairs to transaction counts
             
             for tx in transactions:
                 pair = (tx.sender, tx.receiver)
                 transaction_count[pair] = transaction_count.get(pair, 0) + 1
                 
+                # If a pair exceeds the threshold, mark as suspicious
                 if transaction_count[pair] >= self.transaction_threshold:
                     self.suspicious_transactions.append(tx)
                     return True  # Collusion detected in transaction patterns
@@ -17320,13 +17537,14 @@ icn-prototype/
             Returns:
                 bool: True if suspicious interactions are found, False otherwise.
             """
-            interaction_count = {}  # Maps validator IDs to interaction counts
+            interaction_count: Dict[str, int] = {}  # Maps validator IDs to interaction counts
             
             for interaction in validator.validation_history:
                 interacting_validator = interaction.get("validator_id")
                 if interacting_validator:
                     interaction_count[interacting_validator] = interaction_count.get(interacting_validator, 0) + 1
     
+                    # If repeated interactions exceed the threshold, mark as suspicious
                     if interaction_count[interacting_validator] >= self.validator_threshold:
                         return True  # Collusion detected in validator interactions
     
@@ -17339,10 +17557,28 @@ icn-prototype/
             Args:
                 validator (Node): The validator to mark as suspicious.
             """
+            validator_id = validator.node_id
+            self.suspicious_validators[validator_id] = self.suspicious_validators.get(validator_id, 0) + 1
+            
+            # Update validator metadata and reputation
             validator.metadata["status"] = "suspicious"
             validator.metadata["last_suspicious_activity"] = datetime.now()
             validator.reputation -= 5  # Apply a reputation penalty
             validator.cooldown += 1  # Increase cooldown period for extra precaution
+            
+            # Log suspicious activity
+            self._log_suspicious_activity(validator)
+    
+        def _log_suspicious_activity(self, validator: Node) -> None:
+            """
+            Log details of suspicious activity for auditing and monitoring.
+    
+            Args:
+                validator (Node): The validator marked as suspicious.
+            """
+            validator_id = validator.node_id
+            print(f"[{datetime.now()}] Suspicious activity detected for validator {validator_id}.")
+            print(f"Reputation reduced to {validator.reputation}, status set to 'suspicious'.")
     
         def report_suspicious_transactions(self) -> List[Transaction]:
             """
@@ -17352,13 +17588,31 @@ icn-prototype/
                 List[Transaction]: List of suspicious transactions.
             """
             return self.suspicious_transactions
+    
+        def report_suspicious_validators(self) -> Dict[str, int]:
+            """
+            Generate a report of all validators marked as suspicious during collusion checks.
+    
+            Returns:
+                Dict[str, int]: Dictionary of suspicious validators and their frequency of suspicious activity.
+            """
+            return self.suspicious_validators
+    
+        def reset_suspicion_data(self) -> None:
+            """
+            Reset the collusion detector's data for suspicious transactions and validators.
+    
+            This is useful for clearing past data when starting a new detection cycle.
+            """
+            self.suspicious_transactions.clear()
+            self.suspicious_validators.clear()
 ```
 
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/base.py
-# Size: 5580 bytes
-# Last Modified: Sat Oct 26 18:34:49 2024
+# Size: 8036 bytes
+# Last Modified: Sat Oct 26 23:33:49 2024
 # Language: py
 # ============================================================
 
@@ -17376,7 +17630,7 @@ icn-prototype/
     """
     
     from abc import ABC, abstractmethod
-    from typing import Dict, Any, Optional
+    from typing import Dict, Any, Optional, Union
     
     class BaseValidator(ABC):
         """
@@ -17397,9 +17651,10 @@ icn-prototype/
             """
             self.node_id = node_id
             self.cooperative_id = cooperative_id
-            self.reputation: Dict[str, float] = {}  # Reputation scores across different categories
-            self.performance_metrics: Dict[str, float] = {}  # Track performance (e.g., availability)
-            self.cooldown: int = 0  # Track cooldown period after validation
+            self.reputation: Dict[str, float] = {"validation": 0.0, "cooperation": 0.0}  # Reputation scores
+            self.performance_metrics: Dict[str, Union[float, int]] = {"availability": 0.0, "success_rate": 0.0}
+            self.cooldown: int = 0  # Cooldown period after validation
+            self.inactivity_count: int = 0  # Track validator inactivity
     
         @abstractmethod
         def validate_transaction(self, transaction: Any) -> bool:
@@ -17433,11 +17688,51 @@ icn-prototype/
             """
             self.cooldown = blocks
     
+        def decrease_cooldown(self) -> None:
+            """
+            Decrease the cooldown period by one block.
+            """
+            if self.cooldown > 0:
+                self.cooldown -= 1
+    
         def reset_performance_metrics(self) -> None:
             """
             Reset performance metrics to prepare for the next validation cycle.
             """
-            self.performance_metrics.clear()
+            self.performance_metrics = {"availability": 0.0, "success_rate": 0.0}
+    
+        def update_reputation(self, category: str, score: float) -> None:
+            """
+            Update the validator's reputation score for a given category.
+    
+            Args:
+                category (str): The category of reputation to update (e.g., 'validation', 'cooperation').
+                score (float): The score to add or subtract from the category.
+            """
+            if category in self.reputation:
+                self.reputation[category] += score
+                self.reputation[category] = max(0.0, min(self.reputation[category], 100.0))  # Cap reputation
+    
+        def apply_inactivity_decay(self) -> None:
+            """
+            Apply decay to the validator's reputation if it has been inactive for multiple cycles.
+            """
+            if self.inactivity_count > 3:
+                decay_factor = 0.9
+                for category in self.reputation:
+                    self.reputation[category] *= decay_factor
+    
+        def increment_inactivity(self) -> None:
+            """
+            Increment the inactivity count when the validator fails to participate.
+            """
+            self.inactivity_count += 1
+    
+        def reset_inactivity(self) -> None:
+            """
+            Reset the inactivity count when the validator successfully participates.
+            """
+            self.inactivity_count = 0
     
     class BaseReputationSystem(ABC):
         """
@@ -17452,11 +17747,12 @@ icn-prototype/
             self.reputation_scores: Dict[str, float] = {}  # Overall reputation scores for nodes
     
         @abstractmethod
-        def update_reputation(self, category: str, score: float, evidence: Optional[Dict] = None) -> None:
+        def update_reputation(self, node_id: str, category: str, score: float, evidence: Optional[Dict] = None) -> None:
             """
-            Update the reputation score for a specific category.
+            Update the reputation score for a specific category of a node.
     
             Args:
+                node_id (str): Identifier for the node whose reputation is being updated.
                 category (str): The category of reputation to update (e.g., 'validation', 'cooperation').
                 score (float): The score to add or subtract from the category.
                 evidence (Optional[Dict]): Optional evidence to support the reputation change.
@@ -17464,17 +17760,29 @@ icn-prototype/
             pass
     
         @abstractmethod
-        def get_reputation(self, category: str) -> float:
+        def get_reputation(self, node_id: str, category: str) -> float:
             """
-            Get the current reputation score for a specific category.
+            Get the current reputation score for a specific category of a node.
     
             Args:
+                node_id (str): Identifier for the node whose reputation is being retrieved.
                 category (str): The category of reputation to retrieve.
     
             Returns:
                 float: The reputation score for the specified category.
             """
             pass
+    
+        def apply_global_decay(self, decay_rate: float = 0.95) -> None:
+            """
+            Apply global decay to all reputation scores to incentivize continuous participation.
+    
+            Args:
+                decay_rate (float): The rate at which reputation decays (default is 0.95).
+            """
+            for node, scores in self.reputation_scores.items():
+                for category in scores:
+                    scores[category] *= decay_rate
     
     class BaseTransaction(ABC):
         """
@@ -17527,14 +17835,20 @@ icn-prototype/
             Returns:
                 float: The calculated cooperative score.
             """
-            return self.data.get("cooperative_score", 0)
+            return self.data.get("cooperative_score", 0.0)
+    
+        def log_transaction(self) -> None:
+            """
+            Log transaction details for auditing and debugging purposes.
+            """
+            print(f"Transaction from {self.sender} to {self.receiver} | Action: {self.action} | Data: {self.data}")
 ```
 
 
 # ============================================================
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/cooldown_manager.py
-# Size: 6184 bytes
-# Last Modified: Sat Oct 26 18:37:07 2024
+# Size: 6715 bytes
+# Last Modified: Sat Oct 26 23:37:03 2024
 # Language: py
 # ============================================================
 
@@ -17565,7 +17879,7 @@ icn-prototype/
         - Ensures that validators do not dominate consecutive validation rounds.
         """
         
-        def __init__(self, base_cooldown: int, max_cooldown: int):
+        def __init__(self, base_cooldown: int = 3, max_cooldown: int = 10):
             """
             Initialize the CooldownManager with base and maximum cooldown settings.
     
@@ -17689,9 +18003,20 @@ icn-prototype/
             Returns:
                 Optional[Node]: The validator node, or None if not found.
             """
-            # This method should interface with a node management system to retrieve nodes
             # Placeholder for integration with the broader PoC network
+            # This method should interface with a node management system to retrieve nodes
             return None  # Replace with actual retrieval logic
+    
+        def clear_inactive_validators(self) -> None:
+            """
+            Clear validators from the activity tracker if they have not participated for an extended period.
+    
+            This helps manage memory and ensures the activity tracker remains efficient.
+            """
+            current_time = datetime.now()
+            for validator_id, timestamps in list(self.validator_activity.items()):
+                if timestamps and current_time - timestamps[-1] > timedelta(hours=2):
+                    del self.validator_activity[validator_id]
 ```
 
 

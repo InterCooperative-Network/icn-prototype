@@ -15,6 +15,7 @@ import logging
 import math
 from .types import ConsensusConfig, ValidationResult, ValidationStats
 from ..core.node import Node
+from .collusion_detector import CollusionDetector
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +23,19 @@ class ReputationManager:
     """
     Manages reputation scoring and calculations for the consensus mechanism.
     Handles all aspects of node reputation, including score calculation,
-    decay, and validation eligibility.
+    decay, dynamic adjustments, and validation eligibility.
     """
 
-    def __init__(self, config: ConsensusConfig):
+    def __init__(self, config: ConsensusConfig, collusion_detector: CollusionDetector):
         """
         Initialize the reputation manager.
 
         Args:
             config (ConsensusConfig): The consensus configuration parameters.
+            collusion_detector (CollusionDetector): Instance of the collusion detector for integration.
         """
         self.config = config
+        self.collusion_detector = collusion_detector
         self.node_stats: Dict[str, ValidationStats] = {}
         self.last_score_update: Dict[str, datetime] = {}
         self.score_cache: Dict[str, float] = {}
@@ -41,7 +44,7 @@ class ReputationManager:
     def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
         """
         Calculate a node's cooperation score, considering various factors like diversity,
-        consistency, performance, shard-specific behavior, and time decay.
+        consistency, performance, shard-specific behavior, time decay, and collusion risk.
 
         Args:
             node (Node): The node to calculate the score for.
@@ -69,7 +72,8 @@ class ReputationManager:
             factors = [
                 self._calculate_diversity_factor(node),
                 self._calculate_consistency_factor(node),
-                self._calculate_performance_factor(node)
+                self._calculate_performance_factor(node),
+                self._calculate_collusion_factor(node)
             ]
 
             if shard_id is not None:
@@ -94,6 +98,33 @@ class ReputationManager:
             logger.error(f"Error calculating cooperation score: {str(e)}")
             return 0.0
 
+    def _calculate_collusion_factor(self, node: Node) -> float:
+        """
+        Calculate a collusion factor that reduces the score of nodes with high collusion risk.
+
+        Args:
+            node (Node): The node to calculate the collusion factor for.
+
+        Returns:
+            float: The calculated collusion factor.
+        """
+        try:
+            risk_score = self.collusion_detector._calculate_risk_score(node)
+            
+            # Reduce the factor based on collusion risk
+            if risk_score > 0.9:
+                return 0.2
+            elif risk_score > 0.7:
+                return 0.5
+            elif risk_score > 0.5:
+                return 0.7
+
+            return 1.0  # No penalty for low-risk nodes
+
+        except Exception as e:
+            logger.error(f"Error calculating collusion factor: {str(e)}")
+            return 0.5
+
     def _calculate_diversity_factor(self, node: Node) -> float:
         """
         Calculate a diversity factor based on a node's cooperative interactions. 
@@ -111,12 +142,10 @@ class ReputationManager:
             if not recent_interactions:
                 return 1.0
 
-            # Calculate the ratio of unique interactions to total interactions
             unique_coops = len(set(recent_interactions))
             total_interactions = len(recent_interactions)
             diversity_score = unique_coops / total_interactions
 
-            # Scale diversity factor based on total interactions
             if total_interactions >= 20:
                 if unique_coops >= 5:
                     return 1.0 + math.log(1 + diversity_score) * 1.5
@@ -150,7 +179,6 @@ class ReputationManager:
             )
             success_rate = successful / len(recent_validations)
 
-            # Determine minimum success rate threshold based on experience
             if node.total_validations < 10:
                 min_rate = self.config.validation_thresholds["min_success_rate"] * 0.8
             else:
@@ -185,7 +213,6 @@ class ReputationManager:
             if not metrics:
                 return 1.0
 
-            # Apply weighted performance metrics
             weights = {
                 "availability": 0.35,
                 "validation_success_rate": 0.35,
@@ -408,18 +435,19 @@ class ReputationManager:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig) -> 'ReputationManager':
+    def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig, collusion_detector: CollusionDetector) -> 'ReputationManager':
         """
         Create a reputation manager instance from a dictionary of data.
 
         Args:
             data (Dict[str, Any]): The dictionary data to initialize from.
             config (ConsensusConfig): The consensus configuration parameters.
+            collusion_detector (CollusionDetector): Instance of the collusion detector.
 
         Returns:
             ReputationManager: A new instance of ReputationManager.
         """
-        manager = cls(config)
+        manager = cls(config, collusion_detector)
 
         # Restore node stats
         for node_id, stats_data in data["node_stats"].items():

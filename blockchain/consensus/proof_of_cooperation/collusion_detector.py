@@ -8,9 +8,13 @@ Classes:
     CollusionDetector
 """
 
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 from .types import Node, Transaction, Block
+import logging
+
+# Initialize logging
+logger = logging.getLogger(__name__)
 
 class CollusionDetector:
     """
@@ -23,18 +27,21 @@ class CollusionDetector:
     - Utilizing historical data to identify anomalous patterns that could indicate fraud.
     """
     
-    def __init__(self, transaction_threshold: int = 10, validator_threshold: int = 3):
+    def __init__(self, transaction_threshold: int = 10, validator_threshold: int = 3, dynamic_threshold: bool = True):
         """
         Initialize the CollusionDetector with detection thresholds.
 
         Args:
             transaction_threshold (int): Number of similar transactions required to trigger a collusion check.
             validator_threshold (int): Number of validators interacting repeatedly to trigger a collusion check.
+            dynamic_threshold (bool): If True, thresholds adjust based on network conditions.
         """
         self.transaction_threshold = transaction_threshold
         self.validator_threshold = validator_threshold
+        self.dynamic_threshold = dynamic_threshold
         self.suspicious_transactions: List[Transaction] = []  # Stores potentially collusive transactions
         self.suspicious_validators: Dict[str, int] = {}  # Track suspicious validator behavior
+        self.network_activity: Dict[str, int] = {}  # Track overall network activity for adaptive thresholds
 
     def detect_collusion(self, validator: Node, block: Block) -> bool:
         """
@@ -52,6 +59,10 @@ class CollusionDetector:
         Returns:
             bool: True if collusion is detected, False otherwise.
         """
+        # Adjust thresholds dynamically based on network activity
+        if self.dynamic_threshold:
+            self._adjust_thresholds()
+
         # Analyze transaction patterns
         transactions_suspicious = self._check_transaction_patterns(block.transactions)
 
@@ -64,6 +75,17 @@ class CollusionDetector:
             return True
 
         return False
+
+    def _adjust_thresholds(self) -> None:
+        """
+        Dynamically adjust detection thresholds based on current network activity.
+        This allows the detection mechanism to scale with network load and complexity.
+        """
+        avg_activity = sum(self.network_activity.values()) / len(self.network_activity) if self.network_activity else 1
+        self.transaction_threshold = max(5, int(avg_activity * 0.1))  # Example logic for scaling threshold
+        self.validator_threshold = max(2, int(avg_activity * 0.05))   # Example logic for scaling threshold
+
+        logger.debug(f"Dynamic thresholds adjusted: Transaction={self.transaction_threshold}, Validator={self.validator_threshold}")
 
     def _check_transaction_patterns(self, transactions: List[Transaction]) -> bool:
         """
@@ -79,16 +101,14 @@ class CollusionDetector:
         Returns:
             bool: True if suspicious patterns are found, False otherwise.
         """
-        transaction_count: Dict[Tuple[str, str], int] = {}  # Maps (sender, receiver) pairs to transaction counts
-        
+        transaction_count: Dict[Tuple[str, str], int] = {}
         for tx in transactions:
             pair = (tx.sender, tx.receiver)
             transaction_count[pair] = transaction_count.get(pair, 0) + 1
-            
-            # If a pair exceeds the threshold, mark as suspicious
             if transaction_count[pair] >= self.transaction_threshold:
                 self.suspicious_transactions.append(tx)
-                return True  # Collusion detected in transaction patterns
+                logger.warning(f"Suspicious transaction pattern detected between {tx.sender} and {tx.receiver}")
+                return True
 
         return False
 
@@ -105,17 +125,14 @@ class CollusionDetector:
         Returns:
             bool: True if suspicious interactions are found, False otherwise.
         """
-        interaction_count: Dict[str, int] = {}  # Maps validator IDs to interaction counts
-        
+        interaction_count: Dict[str, int] = {}
         for interaction in validator.validation_history:
             interacting_validator = interaction.get("validator_id")
             if interacting_validator:
                 interaction_count[interacting_validator] = interaction_count.get(interacting_validator, 0) + 1
-
-                # If repeated interactions exceed the threshold, mark as suspicious
                 if interaction_count[interacting_validator] >= self.validator_threshold:
-                    return True  # Collusion detected in validator interactions
-
+                    logger.warning(f"Suspicious validator interaction detected: {validator.node_id} with {interacting_validator}")
+                    return True
         return False
 
     def _mark_validator_as_suspicious(self, validator: Node) -> None:
@@ -131,8 +148,8 @@ class CollusionDetector:
         # Update validator metadata and reputation
         validator.metadata["status"] = "suspicious"
         validator.metadata["last_suspicious_activity"] = datetime.now()
-        validator.reputation -= 5  # Apply a reputation penalty
-        validator.cooldown += 1  # Increase cooldown period for extra precaution
+        validator.reputation = max(0, validator.reputation - 5)
+        validator.cooldown += 1
         
         # Log suspicious activity
         self._log_suspicious_activity(validator)
@@ -145,8 +162,8 @@ class CollusionDetector:
             validator (Node): The validator marked as suspicious.
         """
         validator_id = validator.node_id
-        print(f"[{datetime.now()}] Suspicious activity detected for validator {validator_id}.")
-        print(f"Reputation reduced to {validator.reputation}, status set to 'suspicious'.")
+        logger.info(f"[{datetime.now()}] Suspicious activity detected for validator {validator_id}.")
+        logger.info(f"Reputation reduced to {validator.reputation}, status set to 'suspicious'.")
 
     def report_suspicious_transactions(self) -> List[Transaction]:
         """
@@ -174,3 +191,4 @@ class CollusionDetector:
         """
         self.suspicious_transactions.clear()
         self.suspicious_validators.clear()
+        logger.info("Suspicion data has been reset.")

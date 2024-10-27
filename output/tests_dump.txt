@@ -1266,6 +1266,354 @@ The InterCooperative Network (ICN) is a decentralized cooperative management sys
         unittest.main()
 ```
 
+# File: /home/matt/icn-prototype/tests/integration/test_system.py
+
+```py
+    """
+    blockchain/tests/integration/test_system.py
+    
+    Integration tests for the entire ICN blockchain system.
+    Tests overall system functionality and component interactions.
+    """
+    
+    import pytest
+    import asyncio
+    from datetime import datetime
+    import logging
+    from typing import List, Dict, Optional
+    
+    from blockchain.integration import BlockchainSystem, SystemConfig
+    from blockchain.network.config import NetworkConfig
+    from blockchain.core.node import Node
+    from blockchain.core.transaction import Transaction
+    from blockchain.core.block import Block
+    from blockchain.consensus.proof_of_cooperation import ProofOfCooperation
+    
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    @pytest.fixture
+    async def system():
+        """Create a test blockchain system."""
+        config = SystemConfig(
+            network_config=NetworkConfig(node_id="test_system"),
+            num_shards=2,
+            initial_mana=1000,
+            mana_regen_rate=10,
+            min_nodes=3,
+            max_nodes=100
+        )
+        system = BlockchainSystem(config)
+        await system.initialize()
+        yield system
+        await system.shutdown()
+    
+    @pytest.fixture
+    def test_node():
+        """Create a test node."""
+        node = Node(
+            node_id="test_node",
+            cooperative_id="test_coop",
+            initial_stake=100.0
+        )
+        # Set up node capabilities
+        node.reputation_scores = {
+            "validation": 25.0,
+            "transaction_validation": 25.0,
+            "resource_sharing": 25.0,
+            "cooperative_growth": 25.0,
+            "innovation": 25.0
+        }
+        node.performance_metrics = {
+            "availability": 98.0,
+            "validation_success_rate": 95.0,
+            "network_reliability": 97.0
+        }
+        node.metadata.update({
+            "address": "127.0.0.1",
+            "port": 30303
+        })
+        return node
+    
+    @pytest.mark.asyncio
+    async def test_system_initialization(system):
+        """Test complete system initialization."""
+        # Verify core components
+        assert system.started
+        assert system.blockchain is not None
+        assert system.consensus is not None
+        assert system.network is not None
+        assert system.contract_executor is not None
+    
+        # Verify initial state
+        metrics = system.get_system_status()
+        assert metrics["started"]
+        assert metrics["node_count"] == 0
+        assert metrics["shard_count"] == 2
+        assert "blockchain_metrics" in metrics
+        assert "consensus_metrics" in metrics
+        assert "network_metrics" in metrics
+    
+    @pytest.mark.asyncio
+    async def test_node_management(system, test_node):
+        """Test comprehensive node management."""
+        # Add node
+        success = await system.add_node(test_node)
+        assert success
+        assert test_node.node_id in system.blockchain.nodes
+    
+        # Verify node capabilities
+        node = system.blockchain.nodes[test_node.node_id]
+        assert node.can_validate()
+        assert node.get_total_reputation() > 0
+    
+        # Test node network integration
+        assert await system.network.ping_peer(test_node.node_id)
+    
+        # Test node overload prevention
+        nodes = []
+        for i in range(system.config.max_nodes + 1):
+            node = Node(
+                node_id=f"node_{i}",
+                cooperative_id="test_coop",
+                initial_stake=100.0
+            )
+            success = await system.add_node(node)
+            if i < system.config.max_nodes:
+                assert success
+                nodes.append(node)
+            else:
+                assert not success
+    
+    @pytest.mark.asyncio
+    async def test_transaction_processing(system, test_node):
+        """Test end-to-end transaction processing."""
+        # Add node first
+        await system.add_node(test_node)
+    
+        # Create test transaction
+        transaction = {
+            "sender": test_node.node_id,
+            "receiver": "test_receiver",
+            "action": "transfer",
+            "data": {"amount": 50},
+            "shard_id": 0
+        }
+    
+        # Process transaction
+        success = await system.process_transaction(transaction)
+        assert success
+    
+        # Verify transaction in pool
+        found = False
+        for shard in system.blockchain.shards.values():
+            if any(tx.sender == test_node.node_id for tx in shard.pending_transactions):
+                found = True
+                break
+        assert found
+    
+        # Create block with transaction
+        success = await system.create_block(test_node.node_id)
+        assert success
+    
+        # Verify transaction is no longer pending
+        for shard in system.blockchain.shards.values():
+            assert not any(tx.sender == test_node.node_id for tx in shard.pending_transactions)
+    
+    @pytest.mark.asyncio
+    async def test_block_creation_and_consensus(system, test_node):
+        """Test block creation with consensus mechanism."""
+        await system.add_node(test_node)
+    
+        # Add multiple transactions
+        transactions = []
+        for i in range(3):
+            tx = {
+                "sender": test_node.node_id,
+                "receiver": f"receiver_{i}",
+                "action": "transfer",
+                "data": {"amount": 50 + i},
+                "shard_id": 0
+            }
+            success = await system.process_transaction(tx)
+            assert success
+            transactions.append(tx)
+    
+        # Create block
+        success = await system.create_block(test_node.node_id)
+        assert success
+    
+        # Verify block in chain
+        latest_block = None
+        for shard in system.blockchain.shards.values():
+            if shard.chain[-1].validator == test_node.node_id:
+                latest_block = shard.chain[-1]
+                break
+        assert latest_block is not None
+        assert len(latest_block.transactions) > 0
+    
+    @pytest.mark.asyncio
+    async def test_cross_shard_operation(system, test_node):
+        """Test cross-shard transaction handling."""
+        await system.add_node(test_node)
+    
+        # Create cross-shard transaction
+        transaction = {
+            "sender": test_node.node_id,
+            "receiver": "cross_shard_receiver",
+            "action": "transfer",
+            "data": {
+                "amount": 75,
+                "target_shard": 1
+            },
+            "shard_id": 0,
+            "cross_shard_refs": ["test_ref"]
+        }
+    
+        # Process transaction
+        success = await system.process_transaction(transaction)
+        assert success
+    
+        # Create blocks in both shards
+        success1 = await system.create_block(test_node.node_id, shard_id=0)
+        success2 = await system.create_block(test_node.node_id, shard_id=1)
+        assert success1 and success2
+    
+        # Verify cross-shard references
+        for shard in system.blockchain.shards.values():
+            if shard.shard_id == 0:
+                assert any(block.cross_shard_refs for block in shard.chain[-2:])
+    
+    @pytest.mark.asyncio
+    async def test_network_communication(system, test_node):
+        """Test network communication and message propagation."""
+        await system.add_node(test_node)
+    
+        # Create test message
+        message = {
+            "type": "test_message",
+            "content": "test content",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+        # Broadcast message
+        await system.network.broadcast_message(
+            "test_message",
+            message
+        )
+    
+        # Verify network metrics
+        metrics = system.network.get_metrics()
+        assert metrics["messages_sent"] > 0
+        assert "broadcast_messages" in metrics
+    
+    @pytest.mark.asyncio
+    async def test_system_recovery(system, test_node):
+        """Test system recovery from failure scenarios."""
+        await system.add_node(test_node)
+    
+        # Simulate network interruption
+        await system.network.stop()
+        assert not system.network.is_running
+    
+        # Recover network
+        await system.network.start()
+        assert system.network.is_running
+    
+        # Verify node still accessible
+        assert test_node.node_id in system.blockchain.nodes
+    
+    @pytest.mark.asyncio
+    async def test_resource_management(system, test_node):
+        """Test system resource management and limits."""
+        await system.add_node(test_node)
+    
+        # Track initial mana
+        initial_mana = system.blockchain.cooperative_mana
+    
+        # Create resource-intensive transaction
+        transaction = {
+            "sender": test_node.node_id,
+            "receiver": "resource_test",
+            "action": "compute",
+            "data": {
+                "computation_units": 100,
+                "storage_units": 50
+            }
+        }
+    
+        # Process transaction
+        success = await system.process_transaction(transaction)
+        assert success
+    
+        # Verify mana consumption
+        assert system.blockchain.cooperative_mana < initial_mana
+    
+        # Test mana regeneration
+        system.blockchain.regenerate_mana()
+        assert system.blockchain.cooperative_mana > initial_mana - (initial_mana * 0.1)
+    
+    @pytest.mark.asyncio
+    async def test_system_metrics(system, test_node):
+        """Test comprehensive system metrics collection."""
+        await system.add_node(test_node)
+    
+        # Generate some activity
+        for i in range(3):
+            tx = {
+                "sender": test_node.node_id,
+                "receiver": f"receiver_{i}",
+                "action": "transfer",
+                "data": {"amount": 50 + i}
+            }
+            await system.process_transaction(tx)
+    
+        # Get system status
+        status = system.get_system_status()
+        
+        # Verify metrics
+        assert status["started"]
+        assert status["node_count"] == 1
+        assert status["shard_count"] == 2
+        assert status["uptime"] > 0
+        assert "blockchain_metrics" in status
+        assert "consensus_metrics" in status
+        assert "network_metrics" in status
+    
+        # Verify detailed metrics
+        blockchain_metrics = status["blockchain_metrics"]
+        assert blockchain_metrics["total_transactions"] >= 3
+        assert "chain_length" in blockchain_metrics
+        assert "cooperative_mana" in blockchain_metrics
+    
+    @pytest.mark.asyncio
+    async def test_system_shutdown(system):
+        """Test graceful system shutdown."""
+        # Add some nodes first
+        for i in range(3):
+            node = Node(
+                node_id=f"shutdown_test_node_{i}",
+                cooperative_id="test_coop",
+                initial_stake=100.0
+            )
+            await system.add_node(node)
+    
+        # Shutdown system
+        await system.shutdown()
+        
+        # Verify shutdown state
+        assert not system.started
+        assert not system.network.is_running
+    
+        # Verify cleanup
+        assert system.blockchain is not None  # Should preserve state
+        assert len(system.blockchain.nodes) == 3  # Should preserve nodes
+    
+    if __name__ == "__main__":
+        pytest.main([__file__, "-v"])
+```
+
 # File: /home/matt/icn-prototype/tests/integration/test_smart_contract_execution.py
 
 ```py
@@ -4289,6 +4637,216 @@ The InterCooperative Network (ICN) is a decentralized cooperative management sys
         unittest.main()
 ```
 
+# File: /home/matt/icn-prototype/tests/unit/test_state_verifier.py
+
+```py
+    """
+    tests/unit/test_state_verifier.py
+    
+    Unit tests for state verification functionality.
+    """
+    
+    import pytest
+    from datetime import datetime
+    from typing import Dict, Any
+    from unittest.mock import Mock, patch
+    
+    from blockchain.core.shard.state_verifier import StateVerifier, StateCheckpoint
+    from blockchain.core.shard.cross_shard_transaction import CrossShardTransaction
+    from did.base_did import BaseDID
+    from system.governance import GovernanceSystem
+    
+    @pytest.fixture
+    def mock_governance():
+        governance = Mock(spec=GovernanceSystem)
+        governance.verify_state_checkpoint.return_value = True
+        governance.verify_state_transition.return_value = True
+        return governance
+    
+    @pytest.fixture
+    def mock_validator_did():
+        did = Mock(spec=BaseDID)
+        did.get_did.return_value = "did:icn:validator123"
+        did.verify.return_value = True
+        return did
+    
+    @pytest.fixture
+    def sample_state():
+        return {
+            "account1": {"balance": 1000, "nonce": 1},
+            "account2": {"balance": 2000, "nonce": 1}
+        }
+    
+    @pytest.fixture
+    def state_verifier(mock_governance):
+        return StateVerifier(governance_system=mock_governance)
+    
+    @pytest.fixture
+    def mock_cross_shard_tx():
+        tx = Mock(spec=CrossShardTransaction)
+        tx.transaction_id = "tx123"
+        tx.source_shard = 0
+        tx.target_shards = {1, 2}
+        tx.state = "pending"
+        return tx
+    
+    class TestStateVerifier:
+        @pytest.mark.asyncio
+        async def test_create_checkpoint(self, state_verifier, sample_state, mock_validator_did):
+            """Test creation of state checkpoint."""
+            checkpoint_hash, success = await state_verifier.create_checkpoint(
+                "tx123",
+                0,
+                sample_state,
+                mock_validator_did
+            )
+            
+            assert success
+            assert checkpoint_hash
+            assert "tx123" in state_verifier.state_checkpoints
+            assert 0 in state_verifier.state_checkpoints["tx123"]
+            assert state_verifier.state_checkpoints["tx123"][0].state == sample_state
+    
+        @pytest.mark.asyncio
+        async def test_verify_valid_state_transition(self, state_verifier, sample_state, mock_validator_did):
+            """Test verification of valid state transition."""
+            # Create initial checkpoint
+            await state_verifier.create_checkpoint("tx123", 0, sample_state, mock_validator_did)
+            
+            # Create new state with valid changes
+            new_state = {
+                "account1": {"balance": 900, "nonce": 1},
+                "account2": {"balance": 2100, "nonce": 1}
+            }
+            
+            # Add multiple verifications
+            for i in range(3):
+                success = await state_verifier._verify_shard_state(
+                    "tx123",
+                    0,
+                    new_state,
+                    mock_validator_did
+                )
+                if i == 2:  # Should succeed on third verification
+                    assert success
+                else:
+                    assert not success
+    
+        @pytest.mark.asyncio
+        async def test_verify_invalid_state_transition(self, state_verifier, sample_state, mock_validator_did):
+            """Test verification of invalid state transition."""
+            # Create initial checkpoint
+            await state_verifier.create_checkpoint("tx123", 0, sample_state, mock_validator_did)
+            
+            # Create new state with invalid changes (sum not preserved)
+            invalid_state = {
+                "account1": {"balance": 900, "nonce": 1},
+                "account2": {"balance": 2200, "nonce": 1}  # Invalid increase
+            }
+            
+            success = await state_verifier._verify_shard_state(
+                "tx123",
+                0,
+                invalid_state,
+                mock_validator_did
+            )
+            assert not success
+    
+        @pytest.mark.asyncio
+        async def test_rollback_state(self, state_verifier, sample_state, mock_validator_did):
+            """Test state rollback functionality."""
+            # Create checkpoint
+            await state_verifier.create_checkpoint("tx123", 0, sample_state, mock_validator_did)
+            
+            # Attempt rollback
+            rolled_back_state = await state_verifier.rollback_state("tx123", 0, mock_validator_did)
+            
+            assert rolled_back_state == sample_state
+            assert rolled_back_state is not sample_state  # Should be a copy
+    
+        @pytest.mark.asyncio
+        async def test_verify_cross_shard_transaction(
+            self,
+            state_verifier,
+            mock_cross_shard_tx,
+            sample_state,
+            mock_validator_did
+        ):
+            """Test verification of complete cross-shard transaction."""
+            states = {
+                0: sample_state,
+                1: {"account3": {"balance": 1000, "nonce": 1}},
+                2: {"account4": {"balance": 1000, "nonce": 1}}
+            }
+            
+            # Create checkpoints for all shards
+            for shard_id, state in states.items():
+                await state_verifier.create_checkpoint(
+                    mock_cross_shard_tx.transaction_id,
+                    shard_id,
+                    state,
+                    mock_validator_did
+                )
+            
+            # Verify states
+            success = await state_verifier.verify_state(
+                mock_cross_shard_tx,
+                states,
+                mock_validator_did
+            )
+            assert success
+    
+        @pytest.mark.asyncio
+        async def test_cleanup_old_checkpoints(self, state_verifier, sample_state, mock_validator_did):
+            """Test cleanup of old checkpoints."""
+            # Create checkpoint
+            await state_verifier.create_checkpoint("tx123", 0, sample_state, mock_validator_did)
+            
+            # Run cleanup with small max age
+            await state_verifier.cleanup_old_checkpoints(max_age_hours=0)
+            
+            assert "tx123" not in state_verifier.state_checkpoints
+    
+        def test_get_checkpoint_metrics(self, state_verifier, sample_state, mock_validator_did):
+            """Test retrieval of checkpoint metrics."""
+            state_verifier.create_checkpoint("tx123", 0, sample_state, mock_validator_did)
+            
+            metrics = state_verifier.get_checkpoint_metrics()
+            assert metrics["active_checkpoints"] > 0
+            assert "tx123" in metrics["transactions"]
+    
+        def test_serialization(self, state_verifier, sample_state, mock_validator_did):
+            """Test serialization and deserialization of verifier state."""
+            # Create some state
+            state_verifier.create_checkpoint("tx123", 0, sample_state, mock_validator_did)
+            
+            # Convert to dict
+            state_dict = state_verifier.to_dict()
+            
+            # Create new instance
+            new_verifier = StateVerifier.from_dict(state_dict)
+            
+            assert len(new_verifier.state_checkpoints) == len(state_verifier.state_checkpoints)
+            assert "tx123" in new_verifier.state_checkpoints
+    
+        @pytest.mark.asyncio
+        async def test_governance_integration(
+            self,
+            state_verifier,
+            mock_governance,
+            sample_state,
+            mock_validator_did
+        ):
+            """Test integration with governance system."""
+            await state_verifier.create_checkpoint("tx123", 0, sample_state, mock_validator_did)
+            
+            mock_governance.verify_state_checkpoint.assert_called_once()
+            assert mock_governance.verify_state_checkpoint.call_args[0][0] == "tx123"
+    
+    if __name__ == "__main__":
+        pytest.main([__file__])
+```
+
 # File: /home/matt/icn-prototype/tests/unit/test_smart_contract.py
 
 ```py
@@ -4554,4 +5112,210 @@ The InterCooperative Network (ICN) is a decentralized cooperative management sys
 
 ```py
 
+```
+
+# File: /home/matt/icn-prototype/tests/unit/test_cross_shard_transaction.py
+
+```py
+    """
+    tests/unit/test_cross_shard_transaction.py
+    
+    Unit tests for cross-shard transaction functionality.
+    """
+    
+    import pytest
+    from datetime import datetime
+    from typing import Dict, Set
+    from unittest.mock import Mock, patch
+    
+    from blockchain.core.shard.cross_shard_transaction import CrossShardTransaction, CrossShardTransactionPhase
+    from blockchain.core.transaction import Transaction
+    from did.base_did import BaseDID
+    from system.governance import GovernanceSystem
+    
+    @pytest.fixture
+    def mock_governance():
+        governance = Mock(spec=GovernanceSystem)
+        governance.validate_cross_shard_action.return_value = True
+        governance.record_cross_shard_completion.return_value = None
+        return governance
+    
+    @pytest.fixture
+    def mock_transaction():
+        return Transaction(
+            sender="sender123",
+            receiver="receiver456",
+            action="transfer",
+            data={"amount": 100}
+        )
+    
+    @pytest.fixture
+    def mock_validator_did():
+        did = Mock(spec=BaseDID)
+        did.get_did.return_value = "did:icn:validator123"
+        did.verify.return_value = True
+        return did
+    
+    @pytest.fixture
+    def cross_shard_tx(mock_transaction, mock_governance):
+        return CrossShardTransaction(
+            transaction_id="tx123",
+            source_shard=0,
+            target_shards={1, 2},
+            primary_transaction=mock_transaction,
+            governance_system=mock_governance
+        )
+    
+    class TestCrossShardTransaction:
+        def test_initialization(self, cross_shard_tx):
+            """Test proper initialization of cross-shard transaction."""
+            assert cross_shard_tx.transaction_id == "tx123"
+            assert cross_shard_tx.source_shard == 0
+            assert cross_shard_tx.target_shards == {1, 2}
+            assert cross_shard_tx.state == "pending"
+            assert len(cross_shard_tx.phases) == 3  # source + target shards
+    
+        def test_prepare_phase_success(self, cross_shard_tx, mock_validator_did):
+            """Test successful preparation of a transaction phase."""
+            result = cross_shard_tx.prepare_phase(0, "validator1", mock_validator_did)
+            assert not result  # First validation alone shouldn't complete preparation
+            
+            # Add more validations
+            for i in range(2):
+                cross_shard_tx.prepare_phase(0, f"validator{i+2}", mock_validator_did)
+            
+            # Check phase status after required validations
+            phase = cross_shard_tx.phases[0]
+            assert phase.status == "prepared"
+            assert len(phase.validation_signatures) >= cross_shard_tx.required_validations
+            assert mock_validator_did.get_did() in phase.did_attestations
+    
+        def test_prepare_phase_invalid_shard(self, cross_shard_tx, mock_validator_did):
+            """Test preparation with invalid shard ID."""
+            result = cross_shard_tx.prepare_phase(99, "validator1", mock_validator_did)
+            assert not result
+    
+        def test_commit_phase_success(self, cross_shard_tx, mock_validator_did):
+            """Test successful commit of a prepared phase."""
+            # First prepare the phase
+            for i in range(3):
+                cross_shard_tx.prepare_phase(0, f"validator{i+1}", mock_validator_did)
+                
+            # Then commit
+            result = cross_shard_tx.commit_phase(0, "validator1", mock_validator_did)
+            assert result
+            assert cross_shard_tx.phases[0].status == "committed"
+    
+        def test_commit_phase_without_preparation(self, cross_shard_tx, mock_validator_did):
+            """Test commit attempt without preparation."""
+            result = cross_shard_tx.commit_phase(0, "validator1", mock_validator_did)
+            assert not result
+            assert cross_shard_tx.phases[0].status == "pending"
+    
+        def test_abort_phase(self, cross_shard_tx, mock_validator_did):
+            """Test abortion of a transaction phase."""
+            cross_shard_tx.abort_phase(0, "test abort", mock_validator_did)
+            assert cross_shard_tx.phases[0].status == "aborted"
+            assert cross_shard_tx.state == "aborted"
+    
+        def test_governance_integration(self, cross_shard_tx, mock_validator_did, mock_governance):
+            """Test integration with governance system."""
+            cross_shard_tx.prepare_phase(0, "validator1", mock_validator_did)
+            mock_governance.validate_cross_shard_action.assert_called_once()
+    
+        def test_transaction_completion(self, cross_shard_tx, mock_validator_did):
+            """Test successful completion of all phases."""
+            # Prepare and commit all phases
+            for shard_id in [0, 1, 2]:
+                for i in range(3):
+                    cross_shard_tx.prepare_phase(shard_id, f"validator{i+1}", mock_validator_did)
+                cross_shard_tx.commit_phase(shard_id, "validator1", mock_validator_did)
+                
+            assert cross_shard_tx.state == "completed"
+            assert cross_shard_tx.completed_at is not None
+    
+        def test_serialization(self, cross_shard_tx, mock_validator_did):
+            """Test serialization and deserialization."""
+            # Add some state to the transaction
+            cross_shard_tx.prepare_phase(0, "validator1", mock_validator_did)
+            
+            # Convert to dict
+            tx_dict = cross_shard_tx.to_dict()
+            
+            # Create new instance from dict
+            new_tx = CrossShardTransaction.from_dict(tx_dict)
+            
+            assert new_tx.transaction_id == cross_shard_tx.transaction_id
+            assert new_tx.source_shard == cross_shard_tx.source_shard
+            assert new_tx.target_shards == cross_shard_tx.target_shards
+            assert new_tx.state == cross_shard_tx.state
+    
+        def test_invalid_validator_did(self, cross_shard_tx, mock_validator_did):
+            """Test behavior with invalid validator DID."""
+            mock_validator_did.verify.return_value = False
+            result = cross_shard_tx.commit_phase(0, "validator1", mock_validator_did)
+            assert not result
+    
+        @pytest.mark.asyncio
+        async def test_concurrent_validations(self, cross_shard_tx, mock_validator_did):
+            """Test concurrent validation attempts."""
+            import asyncio
+            
+            async def validate(validator_id: str):
+                return cross_shard_tx.prepare_phase(0, validator_id, mock_validator_did)
+                
+            # Attempt concurrent validations
+            tasks = [validate(f"validator{i}") for i in range(5)]
+            results = await asyncio.gather(*tasks)
+            
+            # Check that exactly required_validations were accepted
+            assert sum(results) == 1  # Only one should return True for completion
+            assert len(cross_shard_tx.phases[0].validation_signatures) >= cross_shard_tx.required_validations
+    
+        def test_phase_timeout(self, cross_shard_tx, mock_validator_did):
+            """Test phase timeout handling."""
+            # Simulate a prepared phase
+            for i in range(3):
+                cross_shard_tx.prepare_phase(0, f"validator{i+1}", mock_validator_did)
+            
+            # Set phase timestamp to past timeout
+            phase = cross_shard_tx.phases[0]
+            phase.timestamp = datetime.now() - timedelta(hours=2)
+            
+            # Attempt to commit
+            result = cross_shard_tx.commit_phase(0, "validator1", mock_validator_did)
+            assert not result
+            
+        def test_cross_shard_ref_tracking(self, cross_shard_tx):
+            """Test tracking of cross-shard references."""
+            # Add some cross-shard references
+            tx_refs = ["ref1", "ref2", "ref3"]
+            cross_shard_tx.primary_transaction.cross_shard_refs = tx_refs
+    
+            # Verify references are tracked
+            for phase in cross_shard_tx.phases.values():
+                if phase.shard_id in cross_shard_tx.target_shards:
+                    assert any(ref in str(phase.data) for ref in tx_refs)
+    
+        def test_did_attestation_validation(self, cross_shard_tx, mock_validator_did):
+            """Test DID attestation validation."""
+            # Add attestation
+            cross_shard_tx.prepare_phase(0, "validator1", mock_validator_did)
+            phase = cross_shard_tx.phases[0]
+            
+            # Verify attestation
+            assert mock_validator_did.get_did() in phase.did_attestations
+            assert len(phase.did_attestations) == 1
+    
+        def test_validator_cooldown(self, cross_shard_tx, mock_validator_did):
+            """Test validator cooldown after validation."""
+            validator_id = "validator1"
+            
+            # First validation
+            result1 = cross_shard_tx.prepare_phase(0, validator_id, mock_validator_did)
+            
+            # Immediate retry should fail
+            result2 = cross_shard_tx.prepare_phase(0, validator_id, mock_validator_did)
+            
+            assert result1 != result2  # One should succeed, one should fail
 ```

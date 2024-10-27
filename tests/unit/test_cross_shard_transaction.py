@@ -152,3 +152,50 @@ class TestCrossShardTransaction:
         # Check that exactly required_validations were accepted
         assert sum(results) == 1  # Only one should return True for completion
         assert len(cross_shard_tx.phases[0].validation_signatures) >= cross_shard_tx.required_validations
+
+    def test_phase_timeout(self, cross_shard_tx, mock_validator_did):
+        """Test phase timeout handling."""
+        # Simulate a prepared phase
+        for i in range(3):
+            cross_shard_tx.prepare_phase(0, f"validator{i+1}", mock_validator_did)
+        
+        # Set phase timestamp to past timeout
+        phase = cross_shard_tx.phases[0]
+        phase.timestamp = datetime.now() - timedelta(hours=2)
+        
+        # Attempt to commit
+        result = cross_shard_tx.commit_phase(0, "validator1", mock_validator_did)
+        assert not result
+        
+    def test_cross_shard_ref_tracking(self, cross_shard_tx):
+        """Test tracking of cross-shard references."""
+        # Add some cross-shard references
+        tx_refs = ["ref1", "ref2", "ref3"]
+        cross_shard_tx.primary_transaction.cross_shard_refs = tx_refs
+
+        # Verify references are tracked
+        for phase in cross_shard_tx.phases.values():
+            if phase.shard_id in cross_shard_tx.target_shards:
+                assert any(ref in str(phase.data) for ref in tx_refs)
+
+    def test_did_attestation_validation(self, cross_shard_tx, mock_validator_did):
+        """Test DID attestation validation."""
+        # Add attestation
+        cross_shard_tx.prepare_phase(0, "validator1", mock_validator_did)
+        phase = cross_shard_tx.phases[0]
+        
+        # Verify attestation
+        assert mock_validator_did.get_did() in phase.did_attestations
+        assert len(phase.did_attestations) == 1
+
+    def test_validator_cooldown(self, cross_shard_tx, mock_validator_did):
+        """Test validator cooldown after validation."""
+        validator_id = "validator1"
+        
+        # First validation
+        result1 = cross_shard_tx.prepare_phase(0, validator_id, mock_validator_did)
+        
+        # Immediate retry should fail
+        result2 = cross_shard_tx.prepare_phase(0, validator_id, mock_validator_did)
+        
+        assert result1 != result2  # One should succeed, one should fail

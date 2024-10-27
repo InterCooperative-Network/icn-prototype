@@ -1,5 +1,5 @@
 import os
-import time
+import zipfile
 
 # Define directories and files to exclude
 EXCLUDE_DIRS = ["__pycache__", ".git", "node_modules", "build", "dist", "venv", ".idea", "icn_env", "docs", "icn-docs", "output"]
@@ -108,6 +108,36 @@ def create_output_file(output_dir, module_name, project_structure, content_str):
     print(f"Created output file: {output_file}")
 
 
+def create_concatenated_file(output_dir, all_content):
+    """
+    Create a single text file that contains all concatenated code with context.
+    """
+    output_file = os.path.join(output_dir, "all_code_dump.txt")
+    with open(output_file, "w", encoding="utf-8") as outfile:
+        # Add general project context
+        outfile.write("# Project Context:\n")
+        outfile.write(PROJECT_CONTEXT + "\n\n")
+        
+        # Add concatenated content
+        outfile.write(all_content)
+
+    print(f"Created concatenated output file: {output_file}")
+
+
+def create_zip_file(output_dir):
+    """
+    Create a zip file containing all output files.
+    """
+    zip_file_path = os.path.join(output_dir, "output_files.zip")
+    with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(output_dir):
+            for file in files:
+                if file != "output_files.zip":  # Avoid adding the zip file to itself
+                    zipf.write(os.path.join(root, file), file)
+
+    print(f"Created zip file: {zip_file_path}")
+
+
 def get_closest_module(file_path):
     """
     Determine the closest related module for unclassified files.
@@ -129,7 +159,7 @@ def get_closest_module(file_path):
 def concatenate_code_files(source_dir, max_depth=3, extensions=None):
     """
     Concatenate code files from a directory into logically grouped smaller output files.
-    Each output includes the overall project structure, module overview, and content with context.
+    Also generates a single file with all code and compresses them into a zip file.
     """
     if extensions is None:
         extensions = [".py", ".rs", ".js", ".ts", ".c"]
@@ -142,6 +172,7 @@ def concatenate_code_files(source_dir, max_depth=3, extensions=None):
     project_structure = tree_structure(source_dir, max_depth=max_depth)
 
     module_contents = {}
+    all_content = "# Project Structure:\n" + project_structure + "\n\n"
 
     for root, dirs, files in os.walk(source_dir):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
@@ -170,6 +201,7 @@ def concatenate_code_files(source_dir, max_depth=3, extensions=None):
                         indented_content = "\n".join("    " + line for line in code_content.splitlines())
                         content_block = f"\n# File: {file_path}\n\n```{file.split('.')[-1]}\n{indented_content}\n```\n"
                         module_contents[module_name] += content_block
+                        all_content += content_block
 
                 except Exception as e:
                     print(f"Error reading {file_path}: {e}")
@@ -178,6 +210,12 @@ def concatenate_code_files(source_dir, max_depth=3, extensions=None):
     for module_name, content_str in module_contents.items():
         if content_str:  # Only create files for non-empty modules
             create_output_file(output_dir, module_name, project_structure, content_str)
+
+    # Create a single concatenated file
+    create_concatenated_file(output_dir, all_content)
+
+    # Create a zip file containing all output files
+    create_zip_file(output_dir)
 
 
 # Example usage

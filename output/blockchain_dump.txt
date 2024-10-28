@@ -7030,6 +7030,516 @@ The InterCooperative Network (ICN) is a decentralized cooperative management sys
     ]
 ```
 
+# File: /home/matt/icn-prototype/blockchain/core/state/state_transition.py
+
+```py
+    """
+    blockchain/core/state/state_transition.py
+    
+    Handles atomic state transitions and rollbacks for the ICN blockchain.
+    Ensures consistent state changes across shards while maintaining verifiability.
+    """
+    
+    from dataclasses import dataclass, field
+    from datetime import datetime
+    from typing import Dict, Optional, Any, Set
+    import hashlib
+    import json
+    import logging
+    from copy import deepcopy
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class StateTransition:
+        """
+        Represents an atomic state transition in the blockchain.
+        
+        Manages the transition between states, including validation,
+        verification, and rollback capabilities. Ensures atomic updates
+        and maintains transition history for auditing purposes.
+        
+        Attributes:
+            transition_id: Unique identifier for the transition.
+            old_state: Previous state before transition.
+            new_state: New state after transition.
+            shard_id: Optional shard identifier for shard-specific transitions.
+            timestamp: Time of transition creation.
+            metadata: Additional metadata for the transition.
+            verified: Indicates if the transition is verified.
+            applied: Indicates if the transition has been applied.
+            verification_signatures: Set of validator signatures for verification.
+        """
+        
+        transition_id: Optional[str] = None
+        old_state: Dict[str, Any] = field(default_factory=dict)
+        new_state: Dict[str, Any] = field(default_factory=dict)
+        shard_id: Optional[int] = None
+        timestamp: datetime = field(default_factory=datetime.now)
+        metadata: Dict[str, Any] = field(default_factory=dict)
+        verified: bool = False
+        applied: bool = False
+        verification_signatures: Set[str] = field(default_factory=set)
+    
+        def __post_init__(self):
+            """Initialize transition after creation."""
+            if not self.transition_id:
+                self.transition_id = self._generate_id()
+    
+            # Deep copy states to prevent accidental modification
+            self.old_state = deepcopy(self.old_state)
+            self.new_state = deepcopy(self.new_state)
+    
+            # Initialize metadata with timestamp if not provided
+            if 'created_at' not in self.metadata:
+                self.metadata['created_at'] = self.timestamp.isoformat()
+    
+        def _generate_id(self) -> str:
+            """
+            Generate a unique transition ID based on state data and timestamp.
+    
+            Returns:
+                str: A SHA-256 hash as the transition ID.
+            """
+            data = {
+                "old_state": self.old_state,
+                "new_state": self.new_state,
+                "shard_id": self.shard_id,
+                "timestamp": self.timestamp.isoformat()
+            }
+            return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+    
+        def validate(self) -> bool:
+            """
+            Validate the state transition.
+    
+            Checks:
+            - State structure validity.
+            - Consistent keys between old and new states.
+            - Transition ID accuracy.
+            - Compliance with state invariants.
+    
+            Returns:
+                bool: True if the transition is valid, False otherwise.
+            """
+            try:
+                # Ensure state structures are dictionaries
+                if not isinstance(self.old_state, dict) or not isinstance(self.new_state, dict):
+                    logger.error("Invalid state structure")
+                    return False
+    
+                # Ensure key consistency between old and new states
+                if set(self.old_state.keys()) != set(self.new_state.keys()):
+                    logger.error("Key mismatch between old and new states")
+                    return False
+    
+                # Validate transition ID
+                if self.transition_id != self._generate_id():
+                    logger.error("Transition ID mismatch")
+                    return False
+    
+                # Verify state invariants
+                if not self._verify_state_invariants():
+                    logger.error("State invariants violated")
+                    return False
+    
+                return True
+    
+            except Exception as e:
+                logger.error(f"Validation failed: {str(e)}")
+                return False
+    
+        def _verify_state_invariants(self) -> bool:
+            """
+            Check that the state transition maintains necessary invariants.
+    
+            This function ensures that no critical state properties are violated,
+            such as negative balances or broken data integrity.
+    
+            Returns:
+                bool: True if invariants are maintained, False otherwise.
+            """
+            for key, value in self.new_state.items():
+                if isinstance(value, (int, float)) and value < 0:
+                    logger.error(f"Negative value for '{key}' in new state")
+                    return False
+            return True
+    
+        def apply(self) -> bool:
+            """
+            Apply the state transition, updating the old state to the new state.
+    
+            Returns:
+                bool: True if the transition is applied successfully, False otherwise.
+            """
+            if not self.verified:
+                logger.error("Cannot apply unverified transition")
+                return False
+    
+            try:
+                self.old_state = deepcopy(self.new_state)
+                self.applied = True
+                logger.info(f"Transition {self.transition_id} applied successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to apply transition: {str(e)}")
+                return False
+    
+        def rollback(self) -> bool:
+            """
+            Roll back the state transition to the old state.
+    
+            Returns:
+                bool: True if rollback is successful, False otherwise.
+            """
+            if not self.applied:
+                logger.error("Cannot roll back an unapplied transition")
+                return False
+    
+            try:
+                self.new_state = deepcopy(self.old_state)
+                self.applied = False
+                logger.info(f"Transition {self.transition_id} rolled back successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to roll back transition: {str(e)}")
+                return False
+    
+        def add_signature(self, signature: str) -> None:
+            """
+            Add a verification signature to the transition.
+    
+            Args:
+                signature (str): The validator's signature.
+            """
+            self.verification_signatures.add(signature)
+            logger.info(f"Signature added to transition {self.transition_id}")
+    
+        def is_fully_verified(self, required_signatures: int) -> bool:
+            """
+            Check if the transition has enough signatures for verification.
+    
+            Args:
+                required_signatures (int): Number of required signatures.
+    
+            Returns:
+                bool: True if the transition is fully verified, False otherwise.
+            """
+            return len(self.verification_signatures) >= required_signatures
+    
+        def to_dict(self) -> Dict[str, Any]:
+            """
+            Convert the state transition object to a dictionary.
+    
+            Returns:
+                Dict[str, Any]: Dictionary representation of the transition.
+            """
+            return {
+                "transition_id": self.transition_id,
+                "old_state": self.old_state,
+                "new_state": self.new_state,
+                "shard_id": self.shard_id,
+                "timestamp": self.timestamp.isoformat(),
+                "metadata": self.metadata,
+                "verified": self.verified,
+                "applied": self.applied,
+                "verification_signatures": list(self.verification_signatures)
+            }
+    
+        @classmethod
+        def from_dict(cls, data: Dict[str, Any]) -> "StateTransition":
+            """
+            Create a StateTransition object from a dictionary.
+    
+            Args:
+                data (Dict[str, Any]): Dictionary containing transition data.
+    
+            Returns:
+                StateTransition: A new StateTransition instance.
+            """
+            return cls(
+                transition_id=data.get("transition_id"),
+                old_state=data.get("old_state", {}),
+                new_state=data.get("new_state", {}),
+                shard_id=data.get("shard_id"),
+                timestamp=datetime.fromisoformat(data.get("timestamp")),
+                metadata=data.get("metadata", {}),
+                verified=data.get("verified", False),
+                applied=data.get("applied", False),
+                verification_signatures=set(data.get("verification_signatures", []))
+            )
+```
+
+# File: /home/matt/icn-prototype/blockchain/core/state/unified_state.py
+
+```py
+    from typing import Dict, Optional, Any, Set, List
+    from datetime import datetime
+    import json
+    import hashlib
+    import logging
+    from dataclasses import dataclass, field
+    from copy import deepcopy
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class StateTransition:
+        """Represents a transition in blockchain state."""
+        old_state: Dict[str, Any]
+        new_state: Dict[str, Any]
+        transaction_id: str
+        shard_id: Optional[int]
+        timestamp: datetime = field(default_factory=datetime.now)
+        metadata: Dict[str, Any] = field(default_factory=dict)
+        
+        def calculate_hash(self) -> str:
+            """Calculate hash of the state transition."""
+            data = {
+                "old_state": self.old_state,
+                "new_state": self.new_state,
+                "transaction_id": self.transaction_id,
+                "shard_id": self.shard_id,
+                "timestamp": self.timestamp.isoformat(),
+                "metadata": self.metadata
+            }
+            return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+    
+    class UnifiedStateManager:
+        """
+        Manages both global and shard-specific state in a unified way.
+        Coordinates state transitions across shards while maintaining global consistency.
+        """
+        
+        def __init__(self, shard_count: int):
+            # Global state
+            self.global_state: Dict[str, Any] = {
+                "accounts": {},      # Global account states
+                "contracts": {},     # Smart contract states
+                "governance": {},    # Governance states
+                "metadata": {        # Global metadata
+                    "last_updated": datetime.now().isoformat(),
+                    "version": "1.0",
+                    "shard_count": shard_count,
+                    "total_transactions": 0,
+                    "total_volume": 0.0
+                }
+            }
+            
+            # Shard states
+            self.shard_states: Dict[int, Dict[str, Any]] = {
+                shard_id: {
+                    "balances": {},  # Shard-specific balances
+                    "metadata": {    # Shard metadata
+                        "shard_id": shard_id,
+                        "created_at": datetime.now().isoformat(),
+                        "last_updated": datetime.now().isoformat(),
+                        "transaction_count": 0
+                    }
+                }
+                for shard_id in range(shard_count)
+            }
+            
+            # State management
+            self.state_transitions: List[StateTransition] = []
+            self.pending_transitions: Dict[str, StateTransition] = {}
+            self.state_roots: Dict[int, str] = {}  # height -> state root
+            self.shard_roots: Dict[int, Dict[int, str]] = {}  # height -> shard_id -> root
+            self.checkpoint_heights: Set[int] = set()
+            
+            self._backup_states: Dict[str, Any] = {}
+    
+        def begin_transition(self, transaction_id: str, shard_id: Optional[int] = None) -> None:
+            """Begin a new state transition, either global or shard-specific."""
+            if transaction_id in self.pending_transitions:
+                raise ValueError(f"Transition already in progress for transaction {transaction_id}")
+                
+            # Backup relevant states
+            if shard_id is not None:
+                old_state = deepcopy(self.shard_states[shard_id])
+                self._backup_states[f"shard_{shard_id}"] = deepcopy(self.shard_states[shard_id])
+            else:
+                old_state = deepcopy(self.global_state)
+                self._backup_states["global"] = deepcopy(self.global_state)
+                
+            self.pending_transitions[transaction_id] = StateTransition(
+                old_state=old_state,
+                new_state=deepcopy(old_state),
+                transaction_id=transaction_id,
+                shard_id=shard_id
+            )
+    
+        def update_shard_balance(self, shard_id: int, account_id: str, delta: float, transaction_id: str) -> bool:
+            """Update an account balance within a specific shard."""
+            try:
+                if transaction_id not in self.pending_transitions:
+                    raise ValueError(f"No transition in progress for transaction {transaction_id}")
+                    
+                transition = self.pending_transitions[transaction_id]
+                if transition.shard_id != shard_id:
+                    raise ValueError(f"Transaction {transaction_id} not associated with shard {shard_id}")
+                    
+                shard_state = transition.new_state
+                
+                # Initialize account if needed
+                if account_id not in shard_state["balances"]:
+                    shard_state["balances"][account_id] = {
+                        "balance": 0.0,
+                        "created_at": datetime.now().isoformat(),
+                        "transaction_count": 0
+                    }
+                    
+                # Update balance
+                account = shard_state["balances"][account_id]
+                new_balance = account["balance"] + delta
+                
+                if new_balance < 0:
+                    return False
+                    
+                account["balance"] = new_balance
+                account["transaction_count"] += 1
+                account["last_updated"] = datetime.now().isoformat()
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to update shard balance: {str(e)}")
+                self.rollback_transition(transaction_id)
+                return False
+    
+        def update_global_state(self, state_type: str, entity_id: str, 
+                              state_update: Dict, transaction_id: str) -> bool:
+            """Update global state (contracts, governance, etc)."""
+            try:
+                if transaction_id not in self.pending_transitions:
+                    raise ValueError(f"No transition in progress for transaction {transaction_id}")
+                    
+                transition = self.pending_transitions[transaction_id]
+                if transition.shard_id is not None:
+                    raise ValueError("Cannot update global state in shard-specific transaction")
+                    
+                if state_type not in transition.new_state:
+                    raise ValueError(f"Invalid state type: {state_type}")
+                    
+                # Initialize entity if needed
+                if entity_id not in transition.new_state[state_type]:
+                    transition.new_state[state_type][entity_id] = {
+                        "created_at": datetime.now().isoformat()
+                    }
+                    
+                # Update state
+                entity_state = transition.new_state[state_type][entity_id]
+                entity_state.update(state_update)
+                entity_state["last_updated"] = datetime.now().isoformat()
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to update global state: {str(e)}")
+                self.rollback_transition(transaction_id)
+                return False
+    
+        def commit_transition(self, transaction_id: str, block_height: int) -> bool:
+            """Commit a state transition and update state roots."""
+            try:
+                if transaction_id not in self.pending_transitions:
+                    raise ValueError(f"No transition found for transaction {transaction_id}")
+                    
+                transition = self.pending_transitions[transaction_id]
+                
+                # Update metadata
+                if transition.shard_id is not None:
+                    # Shard-specific commit
+                    shard_state = self.shard_states[transition.shard_id]
+                    shard_state.update(transition.new_state)
+                    shard_state["metadata"]["last_updated"] = datetime.now().isoformat()
+                    shard_state["metadata"]["transaction_count"] += 1
+                    
+                    # Update shard root
+                    if block_height not in self.shard_roots:
+                        self.shard_roots[block_height] = {}
+                    self.shard_roots[block_height][transition.shard_id] = self._calculate_state_root(shard_state)
+                else:
+                    # Global commit
+                    self.global_state.update(transition.new_state)
+                    self.global_state["metadata"]["last_updated"] = datetime.now().isoformat()
+                    self.global_state["metadata"]["total_transactions"] += 1
+                    
+                    # Update global root
+                    self.state_roots[block_height] = self._calculate_state_root(self.global_state)
+                
+                # Store transition
+                self.state_transitions.append(transition)
+                
+                # Cleanup
+                del self.pending_transitions[transaction_id]
+                if transition.shard_id is not None:
+                    del self._backup_states[f"shard_{transition.shard_id}"]
+                else:
+                    del self._backup_states["global"]
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to commit transition: {str(e)}")
+                self.rollback_transition(transaction_id)
+                return False
+    
+        def rollback_transition(self, transaction_id: str) -> None:
+            """Rollback a pending state transition."""
+            if transaction_id in self.pending_transitions:
+                transition = self.pending_transitions[transaction_id]
+                
+                # Restore from backup
+                if transition.shard_id is not None:
+                    backup_key = f"shard_{transition.shard_id}"
+                    if backup_key in self._backup_states:
+                        self.shard_states[transition.shard_id] = self._backup_states[backup_key]
+                        del self._backup_states[backup_key]
+                else:
+                    if "global" in self._backup_states:
+                        self.global_state = self._backup_states["global"]
+                        del self._backup_states["global"]
+                        
+                del self.pending_transitions[transaction_id]
+    
+        def create_checkpoint(self, block_height: int) -> Dict[str, str]:
+            """Create a checkpoint with both global and shard state roots."""
+            try:
+                checkpoint = {
+                    "global": self._calculate_state_root(self.global_state),
+                    "shards": {
+                        shard_id: self._calculate_state_root(state)
+                        for shard_id, state in self.shard_states.items()
+                    }
+                }
+                
+                self.state_roots[block_height] = checkpoint["global"]
+                self.shard_roots[block_height] = checkpoint["shards"]
+                self.checkpoint_heights.add(block_height)
+                
+                return checkpoint
+                
+            except Exception as e:
+                logger.error(f"Failed to create checkpoint: {str(e)}")
+                return {}
+    
+        def _calculate_state_root(self, state: Dict) -> str:
+            """Calculate Merkle root of a state tree."""
+            state_json = json.dumps(state, sort_keys=True)
+            return hashlib.sha256(state_json.encode()).hexdigest()
+    
+        def get_shard_balance(self, shard_id: int, account_id: str) -> float:
+            """Get account balance within a specific shard."""
+            return self.shard_states[shard_id]["balances"].get(
+                account_id, {"balance": 0.0}
+            )["balance"]
+    
+        def get_global_state(self, state_type: str, entity_id: str) -> Optional[Dict]:
+            """Get state of a global entity (contract, governance, etc)."""
+            return self.global_state.get(state_type, {}).get(entity_id)
+```
+
 # File: /home/matt/icn-prototype/blockchain/core/shard/validation_manager.py
 
 ```py
@@ -8057,235 +8567,6 @@ The InterCooperative Network (ICN) is a decentralized cooperative management sys
             except Exception as e:
                 logger.error(f"Error in string representation: {str(e)}")
                 return "StateVerifier(error)"
-```
-
-# File: /home/matt/icn-prototype/blockchain/core/shard/state_manager.py
-
-```py
-    from typing import Dict, Optional, List, Set, Any
-    import logging
-    from datetime import datetime
-    from copy import deepcopy
-    from .shard_types import ShardConfig, ShardMetrics
-    from ..transaction import Transaction
-    from ..block import Block
-    
-    logger = logging.getLogger(__name__)
-    
-    class StateManager:
-        """
-        Manages state and state transitions within a shard.
-        
-        This class handles:
-        - State updates from transactions and blocks
-        - State validation and consistency checks
-        - State snapshots and rollbacks
-        - State metrics tracking
-        """
-    
-        def __init__(self, shard_id: int, config: ShardConfig):
-            """
-            Initialize the state manager.
-            
-            Args:
-                shard_id: ID of the shard this manager belongs to
-                config: Configuration parameters
-            """
-            self.shard_id = shard_id
-            self.config = config
-            self.state: Dict[str, Any] = {
-                "balances": {},
-                "metadata": {
-                    "shard_id": shard_id,
-                    "created_at": datetime.now().isoformat(),
-                    "last_updated": datetime.now().isoformat(),
-                    "total_transactions": 0,
-                    "total_volume": 0.0,
-                    "version": "1.0"
-                }
-            }
-            self._state_snapshots: List[Dict] = []
-            self.metrics = ShardMetrics()
-            self.processed_transactions: Set[str] = set()
-            self._backup_state: Optional[Dict] = None
-    
-        def update_state(self, block: Block) -> bool:
-            """
-            Update state based on a new block.
-            
-            Args:
-                block: Block containing transactions to process
-                
-            Returns:
-                bool: True if state update successful
-            """
-            try:
-                # Create backup
-                self._backup_state = deepcopy(self.state)
-    
-                # Process all transactions
-                for tx in block.transactions:
-                    if not self._process_transaction(tx):
-                        self._rollback_state()
-                        return False
-    
-                # Update metadata
-                self.state["metadata"].update({
-                    "last_updated": datetime.now().isoformat(),
-                    "total_transactions": self.state["metadata"]["total_transactions"] + len(block.transactions),
-                    "last_block": block.index
-                })
-    
-                # Update metrics
-                self.metrics.total_transactions += len(block.transactions)
-                
-                # Take snapshot if needed
-                if self._should_snapshot():
-                    self._take_snapshot()
-    
-                return True
-    
-            except Exception as e:
-                logger.error(f"Failed to update state: {str(e)}")
-                self._rollback_state()
-                return False
-    
-        def _process_transaction(self, transaction: Transaction) -> bool:
-            """
-            Process a single transaction's state changes.
-            
-            Args:
-                transaction: Transaction to process
-                
-            Returns:
-                bool: True if transaction processed successfully
-            """
-            try:
-                sender = transaction.sender
-                receiver = transaction.receiver
-                amount = float(transaction.data.get("amount", 0))
-                
-                # Initialize balances if needed
-                if sender not in self.state["balances"]:
-                    self.state["balances"][sender] = 1000.0  # Initial balance
-                if receiver not in self.state["balances"]:
-                    self.state["balances"][receiver] = 1000.0  # Initial balance
-    
-                # Check balance
-                if self.state["balances"][sender] < amount:
-                    logger.error(f"Insufficient funds for transaction {transaction.transaction_id}")
-                    return False
-    
-                # Update balances
-                self.state["balances"][sender] -= amount
-                self.state["balances"][receiver] += amount
-    
-                # Track total volume
-                self.state["metadata"]["total_volume"] += amount
-    
-                # Mark as processed
-                self.processed_transactions.add(transaction.transaction_id)
-    
-                return True
-    
-            except Exception as e:
-                logger.error(f"Failed to process transaction {transaction.transaction_id}: {str(e)}")
-                return False
-    
-        def _should_snapshot(self) -> bool:
-            """Determine if state snapshot should be taken."""
-            state_size = len(str(self.state))
-            return (
-                len(self._state_snapshots) == 0 or 
-                state_size > self.config.max_state_size * 0.9
-            )
-    
-        def _take_snapshot(self) -> None:
-            """Take a snapshot of current state."""
-            try:
-                snapshot = {
-                    'timestamp': datetime.now().isoformat(),
-                    'state': deepcopy(self.state),
-                    'metrics': self.metrics.to_dict()
-                }
-                self._state_snapshots.append(snapshot)
-                
-                # Keep only last 10 snapshots
-                if len(self._state_snapshots) > 10:
-                    self._state_snapshots = self._state_snapshots[-10:]
-    
-            except Exception as e:
-                logger.error(f"Failed to take state snapshot: {str(e)}")
-    
-        def _rollback_state(self) -> None:
-            """Rollback to last backup state."""
-            if self._backup_state is not None:
-                self.state = deepcopy(self._backup_state)
-                self._backup_state = None
-    
-        def get_balance(self, address: str) -> float:
-            """
-            Get balance for an address.
-            
-            Args:
-                address: Address to get balance for
-                
-            Returns:
-                float: Current balance
-            """
-            return self.state["balances"].get(address, 0.0)
-    
-        def get_metrics(self) -> Dict[str, Any]:
-            """
-            Get state metrics.
-            
-            Returns:
-                Dict[str, Any]: Dictionary of metrics
-            """
-            return {
-                "total_transactions": self.state["metadata"]["total_transactions"],
-                "total_volume": self.state["metadata"]["total_volume"],
-                "state_size": len(str(self.state)),
-                "processed_transactions": len(self.processed_transactions)
-            }
-    
-        def to_dict(self) -> Dict[str, Any]:
-            """
-            Convert state manager to dictionary format.
-            
-            Returns:
-                Dict[str, Any]: Dictionary representation
-            """
-            return {
-                "state": deepcopy(self.state),
-                "metrics": self.metrics.to_dict(),
-                "processed_transactions": list(self.processed_transactions),
-                "snapshots": self._state_snapshots.copy()
-            }
-    
-        @classmethod
-        def from_dict(cls, data: Dict[str, Any], shard_id: int, config: ShardConfig) -> 'StateManager':
-            """
-            Create state manager from dictionary data.
-            
-            Args:
-                data: Dictionary containing state data
-                shard_id: ID of the shard
-                config: Configuration parameters
-                
-            Returns:
-                StateManager: New state manager instance
-            """
-            manager = cls(shard_id, config)
-            manager.state = deepcopy(data.get("state", {}))
-            manager._state_snapshots = data.get("snapshots", []).copy()
-            manager.processed_transactions = set(data.get("processed_transactions", []))
-            manager.metrics = ShardMetrics.from_dict(data.get("metrics", {}))
-            return manager
-    
-        def __str__(self) -> str:
-            """String representation."""
-            return f"StateManager(shard={self.shard_id}, tx_count={self.state['metadata']['total_transactions']})"
 ```
 
 # File: /home/matt/icn-prototype/blockchain/core/shard/shard_types.py

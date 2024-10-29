@@ -127,6 +127,12 @@ icn-prototype/
         consensus/
             consensus_state_manager.py
             __init__.py
+            system/
+                transaction_pool.py
+                chain_reorganization.py
+                block_production.py
+                initialization_manager.py
+                block_finalization.py
             proof_of_cooperation/
                 metrics_manager.py
                 reputation_manager.py
@@ -18135,6 +18141,1559 @@ icn-prototype/
     from .proof_of_cooperation import ProofOfCooperation
     
     __all__ = ["ProofOfCooperation"]
+```
+
+# File: /home/matt/icn-prototype/blockchain/consensus/system/transaction_pool.py
+
+```py
+
+```
+
+# File: /home/matt/icn-prototype/blockchain/consensus/system/chain_reorganization.py
+
+```py
+    """
+    blockchain/system/chain_reorganization.py
+    
+    Handles chain reorganization events in the ICN blockchain system.
+    Manages fork detection, chain switching, and state rollbacks while 
+    maintaining cross-shard consistency and cooperative principles.
+    """
+    
+    import asyncio
+    import logging
+    from typing import Dict, List, Optional, Tuple, Set
+    from datetime import datetime
+    from dataclasses import dataclass, field
+    
+    from ..core.block import Block
+    from ..core.transaction import Transaction
+    from ..core.state.unified_state import UnifiedStateManager
+    from ..consensus.proof_of_cooperation import ProofOfCooperation
+    from ..core.shard.state_verifier import StateVerifier
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class ReorgEvent:
+        """Represents a chain reorganization event."""
+        old_chain: List[Block]
+        new_chain: List[Block]
+        fork_point: Block
+        timestamp: datetime = field(default_factory=datetime.now)
+        affected_shards: Set[int] = field(default_factory=set)
+        cross_shard_impacts: Dict[int, List[str]] = field(default_factory=dict)
+        reverted_transactions: List[Transaction] = field(default_factory=list)
+        reapplied_transactions: List[Transaction] = field(default_factory=list)
+    
+    class ChainReorganizationManager:
+        """
+        Manages chain reorganization events in the ICN blockchain.
+        
+        Responsibilities:
+        - Detect and validate alternative chains
+        - Manage safe chain switching
+        - Handle state rollbacks and reapplication
+        - Maintain cross-shard consistency
+        - Preserve cooperative principles during reorgs
+        """
+    
+        def __init__(
+            self,
+            state_manager: UnifiedStateManager,
+            consensus: ProofOfCooperation,
+            state_verifier: StateVerifier,
+            max_reorg_depth: int = 100,
+            min_fork_length: int = 3
+        ):
+            """Initialize the reorganization manager."""
+            self.state_manager = state_manager
+            self.consensus = consensus
+            self.state_verifier = state_verifier
+            self.max_reorg_depth = max_reorg_depth
+            self.min_fork_length = min_fork_length
+            
+            # Track reorg history
+            self.reorg_events: List[ReorgEvent] = []
+            self.processing_reorg = False
+            self.last_verification: Dict[int, datetime] = {}
+    
+        async def handle_potential_reorg(
+            self,
+            current_chain: List[Block],
+            alternative_chain: List[Block],
+            shard_id: Optional[int] = None
+        ) -> bool:
+            """
+            Handle a potential chain reorganization.
+    
+            Args:
+                current_chain: Current chain of blocks
+                alternative_chain: Competing chain of blocks
+                shard_id: Optional shard ID if shard-specific
+    
+            Returns:
+                bool: True if reorganization was successful
+            """
+            try:
+                if self.processing_reorg:
+                    logger.warning("Already processing a reorganization")
+                    return False
+    
+                self.processing_reorg = True
+    
+                try:
+                    # Validate reorganization possibility
+                    if not self._validate_reorg_possibility(current_chain, alternative_chain):
+                        return False
+    
+                    # Find fork point
+                    fork_point = await self._find_fork_point(current_chain, alternative_chain)
+                    if not fork_point:
+                        logger.error("Could not find valid fork point")
+                        return False
+    
+                    # Calculate chains to revert and apply
+                    to_revert, to_apply = self._calculate_chain_differences(
+                        current_chain, alternative_chain, fork_point
+                    )
+    
+                    # Verify state transitions
+                    if not await self._verify_state_transitions(to_apply, fork_point):
+                        logger.error("State transition verification failed")
+                        return False
+    
+                    # Create reorg event
+                    reorg_event = ReorgEvent(
+                        old_chain=current_chain,
+                        new_chain=alternative_chain,
+                        fork_point=fork_point
+                    )
+    
+                    # Execute the reorganization
+                    success = await self._execute_reorganization(reorg_event)
+                    if success:
+                        self.reorg_events.append(reorg_event)
+                        await self._notify_reorg_completion(reorg_event)
+                        return True
+    
+                    return False
+    
+                finally:
+                    self.processing_reorg = False
+    
+            except Exception as e:
+                logger.error(f"Error handling chain reorganization: {str(e)}")
+                self.processing_reorg = False
+                return False
+    
+        async def _verify_state_transitions(
+            self,
+            blocks: List[Block],
+            fork_point: Block
+        ) -> bool:
+            """
+            Verify that the state transitions in the new chain are valid.
+            
+            Args:
+                blocks: List of blocks to verify
+                fork_point: The fork point block
+                
+            Returns:
+                bool: True if state transitions are valid
+            """
+            try:
+                # Create temporary state for verification
+                temp_state = self.state_manager.create_snapshot()
+                
+                # Apply each block's state changes
+                current_block = fork_point
+                for block in blocks:
+                    # Verify block links to previous
+                    if block.previous_hash != current_block.hash:
+                        return False
+                        
+                    # Verify transactions and state changes
+                    if not await self.state_verifier.verify_block_state(block, temp_state):
+                        return False
+                        
+                    # Update for next iteration    
+                    current_block = block
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error verifying state transitions: {str(e)}")
+                return False
+    
+        async def _execute_reorganization(self, reorg_event: ReorgEvent) -> bool:
+            """
+            Execute the chain reorganization.
+    
+            Args:
+                reorg_event: The reorganization event to execute
+    
+            Returns:
+                bool: True if reorganization was successful
+            """
+            try:
+                # Begin state transition
+                async with self.state_manager.state_transition():
+                    # Revert blocks from current chain
+                    for block in reversed(reorg_event.old_chain[reorg_event.fork_point.index + 1:]):
+                        if not await self._revert_block(block):
+                            await self.state_manager.rollback_transition()
+                            return False
+                        reorg_event.reverted_transactions.extend(block.transactions)
+    
+                    # Apply blocks from new chain
+                    for block in reorg_event.new_chain[reorg_event.fork_point.index + 1:]:
+                        if not await self._apply_block(block):
+                            await self.state_manager.rollback_transition()
+                            return False
+                        reorg_event.reapplied_transactions.extend(block.transactions)
+    
+                    # Verify final state
+                    if not await self._verify_final_state(reorg_event):
+                        await self.state_manager.rollback_transition()
+                        return False
+    
+                    # Update affected shards tracking
+                    self._track_affected_shards(reorg_event)
+    
+                    # Commit the reorganization
+                    await self.state_manager.commit_transition()
+                    return True
+    
+            except Exception as e:
+                logger.error(f"Error executing reorganization: {str(e)}")
+                return False
+    
+        async def _revert_block(self, block: Block) -> bool:
+            """
+            Revert a block during reorganization.
+    
+            Args:
+                block: Block to revert
+    
+            Returns:
+                bool: True if block was reverted successfully
+            """
+            try:
+                # Revert transactions in reverse order
+                for tx in reversed(block.transactions):
+                    if not await self.state_manager.revert_transaction(tx):
+                        return False
+    
+                # Handle cross-shard references
+                if block.cross_shard_refs:
+                    for ref in block.cross_shard_refs:
+                        if not await self._revert_cross_shard_ref(ref, block.shard_id):
+                            return False
+    
+                # Update state
+                return await self.state_manager.revert_block_state(block)
+    
+            except Exception as e:
+                logger.error(f"Error reverting block: {str(e)}")
+                return False
+    
+        async def _apply_block(self, block: Block) -> bool:
+            """
+            Apply a block during reorganization.
+    
+            Args:
+                block: Block to apply
+    
+            Returns:
+                bool: True if block was applied successfully
+            """
+            try:
+                # Verify block validity
+                if not await self.consensus.validate_block(block, None, None):
+                    return False
+    
+                # Apply transactions
+                for tx in block.transactions:
+                    if not await self.state_manager.apply_transaction(tx):
+                        return False
+    
+                # Handle cross-shard references
+                if block.cross_shard_refs:
+                    for ref in block.cross_shard_refs:
+                        if not await self._apply_cross_shard_ref(ref, block.shard_id):
+                            return False
+    
+                # Update state
+                return await self.state_manager.apply_block_state(block)
+    
+            except Exception as e:
+                logger.error(f"Error applying block: {str(e)}")
+                return False
+    
+        def _track_affected_shards(self, reorg_event: ReorgEvent) -> None:
+            """
+            Track which shards are affected by the reorganization.
+    
+            Args:
+                reorg_event: The reorganization event
+            """
+            # Track shards from old chain
+            for block in reorg_event.old_chain:
+                reorg_event.affected_shards.add(block.shard_id)
+                if block.cross_shard_refs:
+                    for ref in block.cross_shard_refs:
+                        target_shard = self._get_ref_target_shard(ref)
+                        if target_shard is not None:
+                            reorg_event.affected_shards.add(target_shard)
+                            if target_shard not in reorg_event.cross_shard_impacts:
+                                reorg_event.cross_shard_impacts[target_shard] = []
+                            reorg_event.cross_shard_impacts[target_shard].append(ref)
+    
+            # Track shards from new chain
+            for block in reorg_event.new_chain:
+                reorg_event.affected_shards.add(block.shard_id)
+                if block.cross_shard_refs:
+                    for ref in block.cross_shard_refs:
+                        target_shard = self._get_ref_target_shard(ref)
+                        if target_shard is not None:
+                            reorg_event.affected_shards.add(target_shard)
+                            if target_shard not in reorg_event.cross_shard_impacts:
+                                reorg_event.cross_shard_impacts[target_shard] = []
+                            reorg_event.cross_shard_impacts[target_shard].append(ref)
+    
+        def get_reorg_metrics(self) -> Dict:
+            """Get metrics about chain reorganizations."""
+            return {
+                "total_reorgs": len(self.reorg_events),
+                "average_reorg_depth": sum(
+                    len(event.old_chain) - event.fork_point.index 
+                    for event in self.reorg_events
+                ) / max(1, len(self.reorg_events)),
+                "max_reorg_depth": max(
+                    (len(event.old_chain) - event.fork_point.index 
+                     for event in self.reorg_events),
+                    default=0
+                ),
+                "affected_shards": list(set().union(
+                    *(event.affected_shards for event in self.reorg_events)
+                )),
+                "last_reorg_time": self.reorg_events[-1].timestamp.isoformat() 
+                    if self.reorg_events else None,
+                "cross_shard_impacts": sum(
+                    len(event.cross_shard_impacts) for event in self.reorg_events
+                )
+            }
+    
+        def _get_ref_target_shard(self, ref: str) -> Optional[int]:
+            """Extract target shard from cross-shard reference."""
+            try:
+                # Parse reference format to extract target shard
+                # Actual implementation depends on reference format
+                return int(ref.split(':')[1])
+            except Exception:
+                return None
+```
+
+# File: /home/matt/icn-prototype/blockchain/consensus/system/block_production.py
+
+```py
+    """
+    blockchain/system/block_production.py
+    
+    Manages the scheduling and production of blocks in the ICN blockchain.
+    Coordinates block creation across shards while ensuring fair validator
+    participation and maintaining cooperative principles.
+    """
+    
+    import asyncio
+    import logging
+    from typing import Dict, List, Optional, Set, Any
+    from datetime import datetime, timedelta
+    from dataclasses import dataclass, field
+    
+    from ..core.block import Block
+    from ..core.node import Node
+    from ..core.transaction import Transaction
+    from ..consensus.proof_of_cooperation import ProofOfCooperation
+    from ..core.state.unified_state import UnifiedStateManager
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class ProductionSlot:
+        """Represents a scheduled block production slot."""
+        timestamp: datetime
+        shard_id: int
+        validator_id: Optional[str] = None
+        is_filled: bool = False
+        block_hash: Optional[str] = None
+        attempts: int = 0
+        max_attempts: int = 3
+        
+    class BlockProductionScheduler:
+        """
+        Manages the scheduling and coordination of block production.
+        
+        Responsibilities:
+        - Schedule block production slots
+        - Select validators for block production
+        - Coordinate cross-shard block production
+        - Ensure fair validator participation
+        - Handle production failures and timeouts
+        """
+    
+        def __init__(
+            self,
+            consensus: ProofOfCooperation,
+            state_manager: UnifiedStateManager,
+            block_time: int = 15,  # seconds
+            max_missed_slots: int = 3
+        ):
+            """Initialize the block production scheduler."""
+            self.consensus = consensus
+            self.state_manager = state_manager
+            self.block_time = block_time
+            self.max_missed_slots = max_missed_slots
+            
+            # Production scheduling
+            self.production_slots: Dict[int, Dict[int, ProductionSlot]] = {}  # height -> shard_id -> slot
+            self.current_height = 0
+            self.last_production_time: Dict[int, datetime] = {}  # shard_id -> timestamp
+            
+            # Validator tracking
+            self.active_producers: Dict[str, int] = {}  # validator_id -> assigned_height
+            self.missed_slots: Dict[str, int] = {}  # validator_id -> count
+            
+            # Background tasks
+            self.scheduler_task: Optional[asyncio.Task] = None
+            self.cleanup_task: Optional[asyncio.Task] = None
+            self.is_running = False
+            
+            # Metrics
+            self.metrics = {
+                "slots_scheduled": 0,
+                "blocks_produced": 0,
+                "missed_slots": 0,
+                "validator_participation": {},
+                "average_block_time": 0.0,
+                "cross_shard_blocks": 0
+            }
+    
+        async def start(self) -> None:
+            """Start the block production scheduler."""
+            if self.is_running:
+                return
+    
+            self.is_running = True
+            self.scheduler_task = asyncio.create_task(self._scheduling_loop())
+            self.cleanup_task = asyncio.create_task(self._cleanup_loop())
+            logger.info("Block production scheduler started")
+    
+        async def stop(self) -> None:
+            """Stop the block production scheduler."""
+            self.is_running = False
+            
+            if self.scheduler_task:
+                self.scheduler_task.cancel()
+                try:
+                    await self.scheduler_task
+                except asyncio.CancelledError:
+                    pass
+                
+            if self.cleanup_task:
+                self.cleanup_task.cancel()
+                try:
+                    await self.cleanup_task
+                except asyncio.CancelledError:
+                    pass
+    
+            logger.info("Block production scheduler stopped")
+    
+        async def schedule_block_production(self, height: int) -> None:
+            """
+            Schedule block production for a given height.
+    
+            Args:
+                height: The block height to schedule
+            """
+            try:
+                # Initialize slots for height
+                self.production_slots[height] = {}
+                
+                # Schedule for each active shard
+                active_shards = self.state_manager.get_active_shards()
+                for shard_id in active_shards:
+                    # Calculate slot time
+                    slot_time = self._calculate_next_slot_time(shard_id)
+                    
+                    # Create production slot
+                    slot = ProductionSlot(
+                        timestamp=slot_time,
+                        shard_id=shard_id
+                    )
+                    
+                    # Assign validator
+                    validator = await self._select_validator(height, shard_id)
+                    if validator:
+                        slot.validator_id = validator.node_id
+                        self.active_producers[validator.node_id] = height
+                    
+                    self.production_slots[height][shard_id] = slot
+                    self.metrics["slots_scheduled"] += 1
+                    
+                logger.info(f"Scheduled block production for height {height}")
+                
+            except Exception as e:
+                logger.error(f"Error scheduling block production: {str(e)}")
+    
+        async def record_block_production(
+            self,
+            height: int,
+            shard_id: int,
+            block: Block,
+            validator_id: str
+        ) -> None:
+            """
+            Record successful block production.
+    
+            Args:
+                height: Block height
+                shard_id: Shard ID
+                block: The produced block
+                validator_id: ID of the producing validator
+            """
+            try:
+                if height not in self.production_slots or shard_id not in self.production_slots[height]:
+                    logger.error(f"No production slot found for height {height}, shard {shard_id}")
+                    return
+    
+                slot = self.production_slots[height][shard_id]
+                
+                # Update slot status
+                slot.is_filled = True
+                slot.block_hash = block.hash
+                
+                # Update metrics
+                self.metrics["blocks_produced"] += 1
+                self.last_production_time[shard_id] = datetime.now()
+                
+                if block.cross_shard_refs:
+                    self.metrics["cross_shard_blocks"] += 1
+                    
+                # Update validator participation
+                if validator_id not in self.metrics["validator_participation"]:
+                    self.metrics["validator_participation"][validator_id] = 0
+                self.metrics["validator_participation"][validator_id] += 1
+                
+                # Clear from active producers
+                if validator_id in self.active_producers:
+                    del self.active_producers[validator_id]
+                    
+                # Reset missed slots for validator
+                if validator_id in self.missed_slots:
+                    del self.missed_slots[validator_id]
+                    
+                # Update average block time
+                self._update_average_block_time(slot)
+                
+                logger.info(f"Recorded block production for height {height}, shard {shard_id}")
+                
+            except Exception as e:
+                logger.error(f"Error recording block production: {str(e)}")
+    
+        async def record_missed_slot(self, height: int, shard_id: int) -> None:
+            """
+            Record a missed production slot.
+    
+            Args:
+                height: Block height
+                shard_id: Shard ID
+            """
+            try:
+                if height not in self.production_slots or shard_id not in self.production_slots[height]:
+                    return
+    
+                slot = self.production_slots[height][shard_id]
+                validator_id = slot.validator_id
+                
+                if validator_id:
+                    # Update missed slots count
+                    if validator_id not in self.missed_slots:
+                        self.missed_slots[validator_id] = 0
+                    self.missed_slots[validator_id] += 1
+                    
+                    # Handle excessive misses
+                    if self.missed_slots[validator_id] >= self.max_missed_slots:
+                        await self._handle_excessive_misses(validator_id)
+                        
+                # Update metrics
+                self.metrics["missed_slots"] += 1
+                
+                # Try to reassign slot if attempts remain
+                if slot.attempts < slot.max_attempts:
+                    slot.attempts += 1
+                    await self._reassign_slot(height, shard_id, slot)
+                    
+                logger.warning(f"Recorded missed slot for height {height}, shard {shard_id}")
+                
+            except Exception as e:
+                logger.error(f"Error recording missed slot: {str(e)}")
+    
+        async def _scheduling_loop(self) -> None:
+            """Background task for scheduling block production."""
+            while self.is_running:
+                try:
+                    # Schedule next height if needed
+                    current_height = self.state_manager.get_height()
+                    scheduling_horizon = 10  # Schedule 10 blocks ahead
+                    
+                    for height in range(current_height + 1, current_height + scheduling_horizon + 1):
+                        if height not in self.production_slots:
+                            await self.schedule_block_production(height)
+                            
+                    await asyncio.sleep(1)  # Check every second
+                    
+                except Exception as e:
+                    logger.error(f"Error in scheduling loop: {str(e)}")
+                    await asyncio.sleep(5)
+    
+        async def _cleanup_loop(self) -> None:
+            """Background task for cleaning up old production slots."""
+            while self.is_running:
+                try:
+                    current_height = self.state_manager.get_height()
+                    cleanup_threshold = 100  # Keep 100 blocks of history
+                    
+                    # Remove old slots
+                    for height in list(self.production_slots.keys()):
+                        if height < current_height - cleanup_threshold:
+                            del self.production_slots[height]
+                            
+                    await asyncio.sleep(60)  # Clean up every minute
+                    
+                except Exception as e:
+                    logger.error(f"Error in cleanup loop: {str(e)}")
+                    await asyncio.sleep(5)
+    
+        async def _select_validator(self, height: int, shard_id: int) -> Optional[Node]:
+            """Select a validator for block production."""
+            try:
+                # Get eligible validators from consensus
+                validators = await self.consensus.get_eligible_validators(shard_id)
+                if not validators:
+                    return None
+                    
+                # Filter out currently assigned validators
+                available_validators = [
+                    v for v in validators
+                    if v.node_id not in self.active_producers
+                ]
+                
+                if not available_validators:
+                    return None
+                    
+                # Select validator using consensus mechanism
+                selected = await self.consensus.select_validator(available_validators, shard_id)
+                return selected
+                
+            except Exception as e:
+                logger.error(f"Error selecting validator: {str(e)}")
+                return None
+    
+        def _calculate_next_slot_time(self, shard_id: int) -> datetime:
+            """Calculate the next block production slot time for a shard."""
+            try:
+                last_time = self.last_production_time.get(shard_id)
+                if not last_time:
+                    return datetime.now() + timedelta(seconds=self.block_time)
+                    
+                next_time = last_time + timedelta(seconds=self.block_time)
+                if next_time < datetime.now():
+                    next_time = datetime.now() + timedelta(seconds=self.block_time)
+                    
+                return next_time
+                
+            except Exception as e:
+                logger.error(f"Error calculating slot time: {str(e)}")
+                return datetime.now() + timedelta(seconds=self.block_time)
+    
+        async def _reassign_slot(
+            self,
+            height: int,
+            shard_id: int,
+            slot: ProductionSlot
+        ) -> None:
+            """Reassign a production slot to a new validator."""
+            try:
+                # Select new validator
+                new_validator = await self._select_validator(height, shard_id)
+                if new_validator:
+                    # Update slot
+                    slot.validator_id = new_validator.node_id
+                    slot.timestamp = self._calculate_next_slot_time(shard_id)
+                    self.active_producers[new_validator.node_id] = height
+                    
+                    logger.info(
+                        f"Reassigned slot for height {height}, shard {shard_id} "
+                        f"to validator {new_validator.node_id}"
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Error reassigning slot: {str(e)}")
+    
+        async def _handle_excessive_misses(self, validator_id: str) -> None:
+            """Handle a validator that has missed too many slots."""
+            try:
+                # Remove from active producers
+                if validator_id in self.active_producers:
+                    del self.active_producers[validator_id]
+                    
+                # Remove from missed slots tracking
+                if validator_id in self.missed_slots:
+                    del self.missed_slots[validator_id]
+                    
+                # Notify consensus mechanism
+                await self.consensus.handle_validator_timeout(validator_id)
+                
+                logger.warning(f"Handled excessive misses for validator {validator_id}")
+                
+            except Exception as e:
+                logger.error(f"Error handling excessive misses: {str(e)}")
+    
+        def _update_average_block_time(self, slot: ProductionSlot) -> None:
+            """Update average block production time metrics."""
+            try:
+                current_avg = self.metrics["average_block_time"]
+                total_blocks = self.metrics["blocks_produced"]
+                
+                if total_blocks == 0:
+                    self.metrics["average_block_time"] = self.block_time
+                    return
+                    
+                # Calculate new average
+                actual_time = (datetime.now() - slot.timestamp).total_seconds()
+                new_avg = ((current_avg * total_blocks) + actual_time) / (total_blocks + 1)
+                self.metrics["average_block_time"] = new_avg
+                
+            except Exception as e:
+                logger.error(f"Error updating average block time: {str(e)}")
+    
+        def get_scheduled_validators(self, height: int) -> Dict[int, str]:
+            """Get scheduled validators for a height."""
+            try:
+                if height not in self.production_slots:
+                    return {}
+                    
+                return {
+                    shard_id: slot.validator_id
+                    for shard_id, slot in self.production_slots[height].items()
+                    if slot.validator_id is not None
+                }
+                
+            except Exception as e:
+                logger.error(f"Error getting scheduled validators: {str(e)}")
+                return {}
+    
+        def get_production_metrics(self) -> Dict[str, Any]:
+            """Get comprehensive block production metrics."""
+            return {
+                **self.metrics,
+                "active_producers": len(self.active_producers),
+                "current_slots": sum(
+                    len(slots) for slots in self.production_slots.values()
+                ),
+                "filled_slots": sum(
+                    len([s for s in slots.values() if s.is_filled])
+                    for slots in self.production_slots.values()
+                ),
+                "scheduled_heights": sorted(self.production_slots.keys()),
+                "validators_with_misses": len(self.missed_slots)
+            }
+```
+
+# File: /home/matt/icn-prototype/blockchain/consensus/system/initialization_manager.py
+
+```py
+    """
+    blockchain/system/initialization_manager.py
+    
+    Manages the initialization and startup sequence for the ICN blockchain system.
+    Handles component initialization order, state recovery, and system health checks.
+    """
+    
+    import asyncio
+    import logging
+    from typing import Dict, Optional, List, Any
+    from dataclasses import dataclass
+    from datetime import datetime
+    import json
+    from pathlib import Path
+    
+    from ..core.blockchain import Blockchain
+    from ..core.node import Node
+    from ..consensus.proof_of_cooperation import ProofOfCooperation
+    from ..network.manager import NetworkManager
+    from ..network.config import NetworkConfig
+    from ..contracts.contract_executor import ContractExecutor
+    from ..core.state.unified_state import UnifiedStateManager
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class SystemState:
+        """Tracks the initialization and health state of blockchain components."""
+        blockchain_ready: bool = False
+        network_ready: bool = False
+        consensus_ready: bool = False
+        contracts_ready: bool = False
+        state_ready: bool = False
+        components_initialized: Dict[str, bool] = field(default_factory=dict)
+        initialization_time: Optional[datetime] = None
+        last_health_check: Optional[datetime] = None
+        errors: List[str] = field(default_factory=list)
+    
+    class InitializationManager:
+        """
+        Manages the initialization sequence for the ICN blockchain system.
+        
+        Responsibilities:
+        - Coordinated startup of all blockchain components
+        - State recovery and verification
+        - System health monitoring
+        - Graceful shutdown handling
+        """
+    
+        def __init__(self, config_path: str = "config/blockchain_config.json"):
+            """Initialize the manager with configuration."""
+            self.config_path = Path(config_path)
+            self.state = SystemState()
+            self.blockchain: Optional[Blockchain] = None
+            self.network: Optional[NetworkManager] = None
+            self.consensus: Optional[ProofOfCooperation] = None
+            self.contract_executor: Optional[ContractExecutor] = None
+            self.state_manager: Optional[UnifiedStateManager] = None
+            
+            # Track initialization order
+            self.initialization_order = [
+                "state_manager",
+                "blockchain",
+                "consensus",
+                "network",
+                "contracts"
+            ]
+            
+            # Component status tracking
+            self.component_status: Dict[str, bool] = {
+                component: False for component in self.initialization_order
+            }
+    
+        async def initialize_system(self) -> bool:
+            """
+            Initialize all blockchain system components in the correct order.
+            
+            Returns:
+                bool: True if initialization successful, False otherwise
+            """
+            try:
+                logger.info("Beginning blockchain system initialization...")
+                
+                # Load configuration
+                config = await self._load_configuration()
+                if not config:
+                    return False
+    
+                # Initialize components in order
+                for component in self.initialization_order:
+                    success = await self._initialize_component(component, config)
+                    if not success:
+                        logger.error(f"Failed to initialize {component}")
+                        return False
+    
+                # Verify system state
+                if not await self._verify_system_state():
+                    logger.error("System state verification failed")
+                    return False
+    
+                # Start health monitoring
+                asyncio.create_task(self._monitor_system_health())
+                
+                self.state.initialization_time = datetime.now()
+                logger.info("Blockchain system initialization completed successfully")
+                return True
+    
+            except Exception as e:
+                logger.error(f"System initialization failed: {str(e)}")
+                self.state.errors.append(f"Initialization error: {str(e)}")
+                return False
+    
+        async def _load_configuration(self) -> Optional[Dict[str, Any]]:
+            """Load system configuration from file."""
+            try:
+                if not self.config_path.exists():
+                    logger.error(f"Configuration file not found: {self.config_path}")
+                    return None
+    
+                async with aiofiles.open(self.config_path, 'r') as f:
+                    config_data = json.loads(await f.read())
+                    return config_data
+    
+            except Exception as e:
+                logger.error(f"Error loading configuration: {str(e)}")
+                return None
+    
+        async def _initialize_component(self, component: str, config: Dict[str, Any]) -> bool:
+            """Initialize a specific system component."""
+            try:
+                logger.info(f"Initializing component: {component}")
+    
+                if component == "state_manager":
+                    self.state_manager = UnifiedStateManager(
+                        shard_count=config.get("shard_count", 4)
+                    )
+                    success = await self._verify_state_manager()
+    
+                elif component == "blockchain":
+                    self.blockchain = Blockchain(
+                        num_shards=config.get("shard_count", 4),
+                        initial_mana=config.get("initial_mana", 1000),
+                        mana_regen_rate=config.get("mana_regen_rate", 10)
+                    )
+                    success = self.blockchain.genesis_block_created
+    
+                elif component == "consensus":
+                    self.consensus = ProofOfCooperation(
+                        min_reputation=config.get("min_reputation", 10.0),
+                        cooldown_blocks=config.get("cooldown_blocks", 3)
+                    )
+                    success = True
+    
+                elif component == "network":
+                    network_config = NetworkConfig(
+                        node_id=config.get("node_id", ""),
+                        host=config.get("host", "0.0.0.0"),
+                        port=config.get("port", 30303)
+                    )
+                    self.network = NetworkManager(network_config)
+                    success = await self.network.start()
+    
+                elif component == "contracts":
+                    self.contract_executor = ContractExecutor(
+                        initial_mana=config.get("initial_mana", 1000),
+                        mana_regen_rate=config.get("mana_regen_rate", 10)
+                    )
+                    success = True
+    
+                else:
+                    logger.error(f"Unknown component: {component}")
+                    return False
+    
+                self.component_status[component] = success
+                return success
+    
+            except Exception as e:
+                logger.error(f"Error initializing {component}: {str(e)}")
+                self.state.errors.append(f"{component} initialization error: {str(e)}")
+                return False
+    
+        async def _verify_state_manager(self) -> bool:
+            """Verify state manager initialization and recovery."""
+            try:
+                if not self.state_manager:
+                    return False
+    
+                # Verify state access
+                test_key = "initialization_test"
+                test_value = "test_data"
+                
+                # Test state operations
+                self.state_manager.state["test"] = {test_key: test_value}
+                retrieved_value = self.state_manager.state.get("test", {}).get(test_key)
+                
+                if retrieved_value != test_value:
+                    logger.error("State manager verification failed")
+                    return False
+    
+                # Clean up test data
+                del self.state_manager.state["test"]
+                return True
+    
+            except Exception as e:
+                logger.error(f"State manager verification failed: {str(e)}")
+                return False
+    
+        async def _verify_system_state(self) -> bool:
+            """Verify overall system state after initialization."""
+            try:
+                # Check all components are initialized
+                if not all(self.component_status.values()):
+                    return False
+    
+                # Verify blockchain state
+                if not self.blockchain or not self.blockchain.genesis_block_created:
+                    return False
+    
+                # Verify network connectivity
+                if not self.network or not self.network.is_running:
+                    return False
+    
+                # Verify consensus mechanism
+                if not self.consensus:
+                    return False
+    
+                # Verify contract executor
+                if not self.contract_executor:
+                    return False
+    
+                self.state.blockchain_ready = True
+                self.state.network_ready = True
+                self.state.consensus_ready = True
+                self.state.contracts_ready = True
+                self.state.state_ready = True
+    
+                return True
+    
+            except Exception as e:
+                logger.error(f"System state verification failed: {str(e)}")
+                return False
+    
+        async def _monitor_system_health(self) -> None:
+            """Continuously monitor system health."""
+            while True:
+                try:
+                    # Perform health checks
+                    await self._check_component_health()
+                    self.state.last_health_check = datetime.now()
+    
+                    # Wait before next check
+                    await asyncio.sleep(30)
+    
+                except Exception as e:
+                    logger.error(f"Health monitoring error: {str(e)}")
+                    await asyncio.sleep(5)
+    
+        async def _check_component_health(self) -> None:
+            """Check health of individual components."""
+            try:
+                # Check blockchain health
+                if self.blockchain:
+                    chain_metrics = self.blockchain.get_chain_metrics()
+                    if chain_metrics.get("chain_length", 0) < 1:
+                        self.state.blockchain_ready = False
+                        logger.warning("Blockchain health check failed")
+    
+                # Check network health
+                if self.network:
+                    if not self.network.is_running:
+                        self.state.network_ready = False
+                        logger.warning("Network health check failed")
+    
+                # Check consensus health
+                if self.consensus:
+                    consensus_metrics = self.consensus.get_metrics()
+                    if not consensus_metrics:
+                        self.state.consensus_ready = False
+                        logger.warning("Consensus health check failed")
+    
+                # Check contract executor health
+                if self.contract_executor:
+                    if self.contract_executor.mana_pool <= 0:
+                        self.state.contracts_ready = False
+                        logger.warning("Contract executor health check failed")
+    
+            except Exception as e:
+                logger.error(f"Component health check failed: {str(e)}")
+    
+        async def shutdown(self) -> None:
+            """Gracefully shutdown all system components."""
+            try:
+                logger.info("Beginning system shutdown...")
+    
+                # Shutdown components in reverse order
+                for component in reversed(self.initialization_order):
+                    await self._shutdown_component(component)
+    
+                logger.info("System shutdown completed")
+    
+            except Exception as e:
+                logger.error(f"Error during shutdown: {str(e)}")
+    
+        async def _shutdown_component(self, component: str) -> None:
+            """Shutdown a specific system component."""
+            try:
+                logger.info(f"Shutting down component: {component}")
+    
+                if component == "network" and self.network:
+                    await self.network.stop()
+                elif component == "contracts" and self.contract_executor:
+                    # Cleanup contract executor
+                    pass
+                elif component == "blockchain" and self.blockchain:
+                    # Ensure state is saved
+                    pass
+                elif component == "consensus" and self.consensus:
+                    # Cleanup consensus
+                    pass
+                elif component == "state_manager" and self.state_manager:
+                    # Ensure state is persisted
+                    pass
+    
+                self.component_status[component] = False
+    
+            except Exception as e:
+                logger.error(f"Error shutting down {component}: {str(e)}")
+    
+        def get_system_status(self) -> Dict[str, Any]:
+            """Get comprehensive system status."""
+            return {
+                "initialized": all(self.component_status.values()),
+                "initialization_time": self.state.initialization_time.isoformat() 
+                    if self.state.initialization_time else None,
+                "last_health_check": self.state.last_health_check.isoformat() 
+                    if self.state.last_health_check else None,
+                "component_status": self.component_status.copy(),
+                "errors": self.state.errors.copy(),
+                "blockchain_height": self.blockchain.height if self.blockchain else 0,
+                "network_peers": len(self.network.peers) if self.network else 0,
+                "active_contracts": len(self.contract_executor.contracts) 
+                    if self.contract_executor else 0
+            }
+```
+
+# File: /home/matt/icn-prototype/blockchain/consensus/system/block_finalization.py
+
+```py
+    """
+    blockchain/system/block_finalization.py
+    
+    This module implements block finalization for the ICN blockchain.
+    It handles the process of making blocks irreversible once they meet
+    specific criteria, including cooperative validation thresholds and
+    cross-shard consistency requirements.
+    """
+    
+    import asyncio
+    import logging
+    from typing import Dict, List, Optional, Set, Any
+    from datetime import datetime, timedelta
+    from dataclasses import dataclass, field
+    
+    from ..core.block import Block
+    from ..core.state.unified_state import UnifiedStateManager
+    from ..consensus.proof_of_cooperation import ProofOfCooperation
+    from ..core.shard.state_verifier import StateVerifier
+    from .chain_reorganization import ChainReorganizationManager
+    
+    logger = logging.getLogger(__name__)
+    
+    @dataclass
+    class FinalizationCriteria:
+        """Criteria required for block finalization."""
+        min_validator_confirmations: int = 5
+        min_cooperative_confirmations: int = 3
+        confirmation_depth: int = 100
+        cross_shard_validation_threshold: float = 0.8
+        time_threshold: timedelta = field(default_factory=lambda: timedelta(hours=1))
+    
+    @dataclass
+    class BlockFinalizationStatus:
+        """Tracks the finalization status of a block."""
+        block: Block
+        validator_confirmations: Set[str] = field(default_factory=set)
+        cooperative_confirmations: Set[str] = field(default_factory=set)
+        cross_shard_validations: Dict[int, Set[str]] = field(default_factory=dict)
+        first_confirmation_time: Optional[datetime] = None
+        finalization_time: Optional[datetime] = None
+        is_finalized: bool = False
+    
+    class BlockFinalizationManager:
+        """
+        Manages the process of finalizing blocks in the ICN blockchain.
+        
+        Responsibilities:
+        - Track block confirmations from validators
+        - Ensure cross-shard consistency
+        - Apply finalization criteria
+        - Maintain finalization history
+        - Coordinate with reorganization manager
+        """
+    
+        def __init__(
+            self,
+            state_manager: UnifiedStateManager,
+            consensus: ProofOfCooperation,
+            state_verifier: StateVerifier,
+            reorg_manager: ChainReorganizationManager,
+            criteria: Optional[FinalizationCriteria] = None
+        ):
+            """Initialize block finalization manager."""
+            self.state_manager = state_manager
+            self.consensus = consensus
+            self.state_verifier = state_verifier
+            self.reorg_manager = reorg_manager
+            self.criteria = criteria or FinalizationCriteria()
+            
+            # Track finalization status
+            self.pending_finalization: Dict[str, BlockFinalizationStatus] = {}
+            self.finalized_blocks: Dict[str, BlockFinalizationStatus] = {}
+            self.finalization_height: int = 0
+            self.checkpoints: Dict[int, str] = {}  # height -> block_hash
+            
+            # Background tasks
+            self._finalization_task: Optional[asyncio.Task] = None
+            self._checkpoint_task: Optional[asyncio.Task] = None
+            self.is_running = False
+    
+        async def start(self) -> None:
+            """Start the finalization manager."""
+            if self.is_running:
+                return
+    
+            self.is_running = True
+            self._finalization_task = asyncio.create_task(self._finalization_loop())
+            self._checkpoint_task = asyncio.create_task(self._checkpoint_loop())
+            logger.info("Block finalization manager started")
+    
+        async def stop(self) -> None:
+            """Stop the finalization manager."""
+            self.is_running = False
+            
+            if self._finalization_task:
+                self._finalization_task.cancel()
+                try:
+                    await self._finalization_task
+                except asyncio.CancelledError:
+                    pass
+                
+            if self._checkpoint_task:
+                self._checkpoint_task.cancel()
+                try:
+                    await self._checkpoint_task
+                except asyncio.CancelledError:
+                    pass
+                    
+            logger.info("Block finalization manager stopped")
+    
+        async def add_confirmation(
+            self,
+            block: Block,
+            validator_id: str,
+            cooperative_id: Optional[str] = None
+        ) -> None:
+            """
+            Add a validator confirmation for a block.
+    
+            Args:
+                block: The block being confirmed
+                validator_id: ID of the confirming validator
+                cooperative_id: Optional cooperative ID of the validator
+            """
+            try:
+                block_hash = block.hash
+                if block_hash not in self.pending_finalization:
+                    self.pending_finalization[block_hash] = BlockFinalizationStatus(block=block)
+                    
+                status = self.pending_finalization[block_hash]
+                
+                # Record confirmation time if first confirmation
+                if not status.first_confirmation_time:
+                    status.first_confirmation_time = datetime.now()
+                
+                # Add validator confirmation
+                status.validator_confirmations.add(validator_id)
+                
+                # Add cooperative confirmation if provided
+                if cooperative_id:
+                    status.cooperative_confirmations.add(cooperative_id)
+                
+                # Check if block can be finalized
+                if await self._check_finalization_criteria(status):
+                    await self._finalize_block(status)
+                    
+            except Exception as e:
+                logger.error(f"Error adding confirmation: {str(e)}")
+    
+        async def add_cross_shard_validation(
+            self,
+            block: Block,
+            shard_id: int,
+            validator_id: str
+        ) -> None:
+            """
+            Add a cross-shard validation for a block.
+    
+            Args:
+                block: The block being validated
+                shard_id: ID of the validating shard
+                validator_id: ID of the validating node
+            """
+            try:
+                block_hash = block.hash
+                if block_hash not in self.pending_finalization:
+                    self.pending_finalization[block_hash] = BlockFinalizationStatus(block=block)
+                    
+                status = self.pending_finalization[block_hash]
+                
+                # Initialize cross-shard validation set if needed
+                if shard_id not in status.cross_shard_validations:
+                    status.cross_shard_validations[shard_id] = set()
+                    
+                # Add validation
+                status.cross_shard_validations[shard_id].add(validator_id)
+                
+                # Check if block can be finalized
+                if await self._check_finalization_criteria(status):
+                    await self._finalize_block(status)
+                    
+            except Exception as e:
+                logger.error(f"Error adding cross-shard validation: {str(e)}")
+    
+        async def _check_finalization_criteria(self, status: BlockFinalizationStatus) -> bool:
+            """
+            Check if a block meets all finalization criteria.
+    
+            Args:
+                status: The block's finalization status
+    
+            Returns:
+                bool: True if block meets finalization criteria
+            """
+            try:
+                # Check if already finalized
+                if status.is_finalized:
+                    return False
+    
+                # Check validator confirmations
+                if len(status.validator_confirmations) < self.criteria.min_validator_confirmations:
+                    return False
+    
+                # Check cooperative confirmations
+                if len(status.cooperative_confirmations) < self.criteria.min_cooperative_confirmations:
+                    return False
+    
+                # Check confirmation depth
+                current_height = self.state_manager.get_height()
+                if current_height - status.block.index < self.criteria.confirmation_depth:
+                    return False
+    
+                # Check cross-shard validations
+                if status.block.cross_shard_refs:
+                    validation_ratio = self._calculate_cross_shard_validation_ratio(status)
+                    if validation_ratio < self.criteria.cross_shard_validation_threshold:
+                        return False
+    
+                # Check time threshold
+                if (datetime.now() - status.first_confirmation_time
+                    < self.criteria.time_threshold):
+                    return False
+    
+                return True
+    
+            except Exception as e:
+                logger.error(f"Error checking finalization criteria: {str(e)}")
+                return False
+    
+        def _calculate_cross_shard_validation_ratio(
+            self,
+            status: BlockFinalizationStatus
+        ) -> float:
+            """Calculate the ratio of completed cross-shard validations."""
+            try:
+                total_shards = len(self.state_manager.get_active_shards())
+                validated_shards = len(status.cross_shard_validations)
+                
+                if total_shards == 0:
+                    return 0.0
+                    
+                return validated_shards / total_shards
+                
+            except Exception as e:
+                logger.error(f"Error calculating validation ratio: {str(e)}")
+                return 0.0
+    
+        async def _finalize_block(self, status: BlockFinalizationStatus) -> None:
+            """
+            Finalize a block that has met all criteria.
+    
+            Args:
+                status: The block's finalization status
+            """
+            try:
+                block_hash = status.block.hash
+                
+                # Update finalization status
+                status.is_finalized = True
+                status.finalization_time = datetime.now()
+                
+                # Move from pending to finalized
+                self.finalized_blocks[block_hash] = status
+                if block_hash in self.pending_finalization:
+                    del self.pending_finalization[block_hash]
+                
+                # Update finalization height if necessary
+                if status.block.index > self.finalization_height:
+                    self.finalization_height = status.block.index
+                
+                # Create checkpoint if needed
+                if self._should_create_checkpoint(status.block):
+                    await self._create_checkpoint(status.block)
+                
+                # Notify components
+                await self._notify_finalization(status)
+                
+                logger.info(f"Finalized block at height {status.block.index}")
+                
+            except Exception as e:
+                logger.error(f"Error finalizing block: {str(e)}")
+    
+        async def _finalization_loop(self) -> None:
+            """Background task to process pending finalizations."""
+            while self.is_running:
+                try:
+                    # Check all pending blocks
+                    for block_hash, status in list(self.pending_finalization.items()):
+                        if await self._check_finalization_criteria(status):
+                            await self._finalize_block(status)
+                            
+                    await asyncio.sleep(1)  # Prevent tight loop
+                    
+                except Exception as e:
+                    logger.error(f"Error in finalization loop: {str(e)}")
+                    await asyncio.sleep(5)  # Back off on error
+    
+        async def _checkpoint_loop(self) -> None:
+            """Background task to create periodic checkpoints."""
+            while self.is_running:
+                try:
+                    # Find latest finalized block
+                    latest_height = max(
+                        (status.block.index for status in self.finalized_blocks.values()),
+                        default=0
+                    )
+                    
+                    # Create checkpoint if needed
+                    if latest_height > 0:
+                        latest_block = next(
+                            status.block
+                            for status in self.finalized_blocks.values()
+                            if status.block.index == latest_height
+                        )
+                        if self._should_create_checkpoint(latest_block):
+                            await self._create_checkpoint(latest_block)
+                    
+                    await asyncio.sleep(60)  # Check every minute
+                    
+                except Exception as e:
+                    logger.error(f"Error in checkpoint loop: {str(e)}")
+                    await asyncio.sleep(5)
+    
+        def _should_create_checkpoint(self, block: Block) -> bool:
+            """Determine if a checkpoint should be created for a block."""
+            try:
+                # Create checkpoint every 1000 blocks
+                checkpoint_interval = 1000
+                
+                # Check if height is at checkpoint interval
+                if block.index % checkpoint_interval != 0:
+                    return False
+                    
+                # Check if checkpoint already exists
+                if block.index in self.checkpoints:
+                    return False
+                    
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error checking checkpoint criteria: {str(e)}")
+                return False
+    
+        async def _create_checkpoint(self, block: Block) -> None:
+            """Create a checkpoint for a finalized block."""
+            try:
+                # Get state root at block height
+                state_root = await self.state_manager.get_state_root(block.index)
+                if not state_root:
+                    return
+                    
+                # Create checkpoint
+                self.checkpoints[block.index] = block.hash
+                
+                # Persist checkpoint data
+                checkpoint_data = {
+                    "height": block.index,
+                    "block_hash": block.hash,
+                    "state_root": state_root,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                await self._persist_checkpoint(checkpoint_data)
+                logger.info(f"Created checkpoint at height {block.index}")
+                
+            except Exception as e:
+                logger.error(f"Error creating checkpoint: {str(e)}")
+    
+        async def _persist_checkpoint(self, checkpoint_data: Dict[str, Any]) -> None:
+            """Persist checkpoint data to storage."""
+            try:
+                # Save checkpoint to state manager
+                await self.state_manager.save_checkpoint(checkpoint_data)
+                
+            except Exception as e:
+                logger.error(f"Error persisting checkpoint: {str(e)}")
+    
+        async def _notify_finalization(self, status: BlockFinalizationStatus) -> None:
+            """Notify relevant components about block finalization."""
+            try:
+                # Notify consensus mechanism
+                await self.consensus.handle_block_finalization(status.block)
+                
+                # Notify state manager
+                await self.state_manager.handle_block_finalization(status.block)
+                
+                # Notify reorg manager
+                await self.reorg_manager.handle_block_finalization(status.block)
+                
+            except Exception as e:
+                logger.error(f"Error notifying finalization: {str(e)}")
+    
+        def is_finalized(self, block_hash: str) -> bool:
+            """Check if a block is finalized."""
+            return block_hash in self.finalized_blocks
+    
+        def get_finalization_height(self) -> int:
+            """Get the current finalization height."""
+            return self.finalization_height
+    
+        def get_finalization_stats(self) -> Dict[str, Any]:
+            """Get statistics about block finalization."""
+            try:
+                total_finalized = len(self.finalized_blocks)
+                if total_finalized == 0:
+                    return {
+                        "total_finalized": 0,
+                        "average_time_to_finalize": 0,
+                        "pending_finalizations": len(self.pending_finalization)
+                    }
+                
+                # Calculate average time to finalize
+                total_time = sum(
+                    (status.finalization_time - status.first_confirmation_time).total_seconds()
+                    for status in self.finalized_blocks.values()
+                    if status.finalization_time and status.first_confirmation_time
+                )
+                
+                return {
+                    "total_finalized": total_finalized,
+                    "average_time_to_finalize": total_time / total_finalized,
+                    "pending_finalizations": len(self.pending_finalization),
+                    "finalization_height": self.finalization_height,
+                    "checkpoints": len(self.checkpoints),
+                    "latest_checkpoint": max(self.checkpoints.keys(), default=0)
+                }
+                
+            except Exception as e:
+                logger.error(f"Error getting finalization stats: {str(e)}")
+                return {}
 ```
 
 # File: /home/matt/icn-prototype/blockchain/consensus/proof_of_cooperation/metrics_manager.py

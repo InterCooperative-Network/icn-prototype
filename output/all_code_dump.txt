@@ -40,6 +40,40 @@ icn-prototype/
         __init__.py
     .vscode/
         settings.json
+    icn-ui/
+        package-lock.json
+        package.json
+        .gitignore
+        tailwind.config.js
+        README.md
+        src/
+            index.css
+            logo.svg
+            App.css
+            App.test.js
+            App.js
+            setupTests.js
+            reportWebVitals.js
+            index.js
+            utils/
+                api.js
+            components/
+                Navbar.js
+            pages/
+                HomePage.js
+                Governance.js
+                Dashboard.js
+                Marketplace.js
+                DIDManagement.js
+                RegisterPage.js
+                LoginPage.js
+        public/
+            logo512.png
+            manifest.json
+            robots.txt
+            logo192.png
+            favicon.ico
+            index.html
     tests/
         __init__.py
         integration/
@@ -1463,6 +1497,12 @@ icn-prototype/
 # File: /home/matt/icn-prototype/api/__init__.py
 
 ```py
+
+```
+
+# File: /home/matt/icn-prototype/icn-ui/src/utils/api.js
+
+```js
 
 ```
 

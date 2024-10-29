@@ -1,9 +1,23 @@
-# blockchain/core/shard/base.py
+"""
+blockchain/core/shard/base.py
+
+Implements shard functionality for the ICN blockchain. Each shard represents an independent
+processing unit that handles a subset of transactions while maintaining consistency with
+the broader network through cross-shard communication and state verification.
+
+Key responsibilities:
+- Transaction processing within the shard
+- Block creation and validation
+- State management
+- Cross-shard coordination
+- Resource tracking
+"""
 
 from typing import Dict, List, Optional, Set, Any, Union
 import logging
 from datetime import datetime
 from copy import deepcopy
+
 from .shard_types import ShardConfig, ShardMetrics
 from .transaction_manager import TransactionManager
 from .state_manager import StateManager
@@ -11,35 +25,42 @@ from .validation_manager import ValidationManager
 from .cross_shard_manager import CrossShardManager
 from ..block import Block
 from ..transaction import Transaction
+from ...consensus.proof_of_cooperation import ProofOfCooperation
 
 logger = logging.getLogger(__name__)
 
 class Shard:
     """
-    Main shard class that coordinates all shard components.
+    Main shard implementation for parallel transaction processing.
     
-    This class serves as the primary interface for shard operations,
-    delegating specific functionalities to specialized managers while
-    maintaining backward compatibility with existing interfaces.
+    A shard is an independent processing unit that manages a subset of transactions
+    while maintaining consistency with the broader network through cross-shard
+    communication and state verification.
+
+    The class coordinates between different managers to handle transactions,
+    state, validation, and cross-shard operations efficiently.
     """
 
-    # Maintain class-level defaults for backward compatibility
     DEFAULT_MAX_TRANSACTIONS = 100
 
-    def __init__(self, shard_id: int, config: Optional[ShardConfig] = None, **kwargs):
+    def __init__(
+        self, 
+        shard_id: int, 
+        config: Optional[ShardConfig] = None,
+        **kwargs
+    ):
         """
         Initialize a new shard.
-        
+
         Args:
             shard_id: Unique identifier for this shard
-            config: Optional configuration, uses defaults if not provided
-            **kwargs: Legacy support for direct parameter passing
-                     (e.g., max_transactions_per_block)
+            config: Optional configuration settings
+            **kwargs: Additional configuration parameters
         """
         if not isinstance(shard_id, int) or shard_id < 0:
             raise ValueError("Invalid shard_id. Must be non-negative integer.")
 
-        # Handle legacy initialization
+        # Initialize configuration
         if config is None:
             config = ShardConfig()
             if 'max_transactions_per_block' in kwargs:
@@ -59,13 +80,13 @@ class Shard:
         except Exception as e:
             logger.error(f"Failed to initialize shard managers: {str(e)}")
             raise
-        
+
         # Core properties
         self.chain: List[Block] = []
         self.height = 0
         self.known_validators: Set[str] = set()
-        
-        # Initialize genesis block and state
+
+        # Initialize state and genesis block
         self._create_genesis_block()
         self._initialize_state()
 
@@ -82,18 +103,17 @@ class Shard:
                     "version": "1.0"
                 }
             })
-            
-            # Ensure balances are initialized
+
+            # Initialize balances
             if "balances" not in self.state_manager.state:
-                self.state_manager.state["balances"] = {
-                    f"user{i}": 1000.0 for i in range(10)
-                }
+                self.state_manager.state["balances"] = {}
+
         except Exception as e:
             logger.error(f"Failed to initialize state: {str(e)}")
             raise
 
     def _create_genesis_block(self) -> None:
-        """Create and add the genesis block."""
+        """Create and add the genesis block for this shard."""
         try:
             genesis_block = Block(
                 index=0,
@@ -103,53 +123,25 @@ class Shard:
                 validator="genesis",
                 shard_id=self.shard_id
             )
-            
+
             self.chain.append(genesis_block)
             self.height = 1
             self.known_validators.add("genesis")
+
         except Exception as e:
             logger.error(f"Failed to create genesis block: {str(e)}")
             raise
 
-    @property
-    def max_transactions_per_block(self) -> int:
-        """Property accessor for backward compatibility."""
-        return self.config.max_transactions_per_block
-
-    @classmethod
-    def get_max_transactions_per_block(cls) -> int:
-        """Class method accessor for backward compatibility."""
-        return cls.DEFAULT_MAX_TRANSACTIONS
-
-    @property
-    def cross_shard_references(self) -> Dict[int, List[str]]:
-        """Property accessor for cross shard references."""
-        return self.cross_shard_manager.cross_shard_refs
-
-    @property
-    def average_block_time(self) -> float:
-        """Calculate average time between blocks."""
-        if len(self.chain) < 2:
-            return 0.0
-        
-        total_time = sum(
-            (self.chain[i].timestamp - self.chain[i-1].timestamp).total_seconds()
-            for i in range(1, len(self.chain))
-        )
-        return total_time / (len(self.chain) - 1)
-
-    @property
-    def pending_transactions(self) -> List[Transaction]:
-        """Property accessor for backward compatibility."""
-        return self.transaction_manager.pending_transactions
-
-    @property
-    def state(self) -> Dict:
-        """Property accessor for backward compatibility."""
-        return self.state_manager.state
-
     def add_transaction(self, transaction: Transaction) -> bool:
-        """Add a new transaction to the shard."""
+        """
+        Add a new transaction to the shard.
+
+        Args:
+            transaction: Transaction to add
+
+        Returns:
+            bool: True if transaction added successfully
+        """
         if not isinstance(transaction, Transaction):
             logger.error("Invalid transaction type")
             return False
@@ -174,17 +166,27 @@ class Shard:
             logger.error(f"Failed to add transaction: {str(e)}")
             return False
 
-    def create_block(self, validator: str) -> Optional[Block]:
-        """Create a new block from pending transactions."""
+    async def create_block(self, validator: str) -> Optional[Block]:
+        """
+        Create a new block from pending transactions.
+
+        Args:
+            validator: ID of the validating node
+
+        Returns:
+            Optional[Block]: Created block if successful
+        """
         if not validator:
             logger.error("Invalid validator ID")
             return None
 
         try:
+            # Get transactions for block
             transactions = self.transaction_manager.select_transactions_for_block()
             if not transactions:
                 return None
 
+            # Create block
             block = Block(
                 index=self.height,
                 previous_hash=self.chain[-1].hash if self.chain else "0" * 64,
@@ -206,14 +208,25 @@ class Shard:
             return None
 
     def add_block(self, block: Block) -> bool:
-        """Add a validated block to the chain."""
+        """
+        Add a validated block to the chain.
+
+        Args:
+            block: Block to add
+
+        Returns:
+            bool: True if block added successfully
+        """
         if not isinstance(block, Block):
             logger.error("Invalid block type")
             return False
 
         try:
             # Validate block
-            if not self.validation_manager.validate_block(block, self.chain[-1] if self.chain else None):
+            if not self.validation_manager.validate_block(
+                block, 
+                self.chain[-1] if self.chain else None
+            ):
                 logger.error("Block validation failed")
                 return False
 
@@ -227,7 +240,7 @@ class Shard:
             self.height += 1
             self.known_validators.add(block.validator)
 
-            # Update cross-shard references
+            # Process cross-shard references
             if block.cross_shard_refs:
                 for ref_id in block.cross_shard_refs:
                     self.cross_shard_manager.validate_reference(ref_id)
@@ -243,13 +256,21 @@ class Shard:
             return False
 
     def validate_chain(self) -> bool:
-        """Validate the entire chain."""
+        """
+        Validate the entire shard chain.
+
+        Returns:
+            bool: True if chain is valid
+        """
         try:
             if not self.chain:
                 return True
 
             for i in range(1, len(self.chain)):
-                if not self.validation_manager.validate_block(self.chain[i], self.chain[i-1]):
+                if not self.validation_manager.validate_block(
+                    self.chain[i],
+                    self.chain[i-1]
+                ):
                     return False
             return True
 
@@ -258,28 +279,43 @@ class Shard:
             return False
 
     def get_metrics(self) -> Dict[str, Any]:
-        """Get comprehensive shard metrics."""
+        """
+        Get comprehensive shard metrics.
+
+        Returns:
+            Dict[str, Any]: Dictionary of metrics
+        """
         try:
-            # Core metrics
             metrics = {
                 "shard_id": self.shard_id,
                 "height": self.height,
                 "chain_size": len(self.chain),
                 "known_validators": len(self.known_validators),
                 "last_block_time": self.chain[-1].timestamp.isoformat() if self.chain else None,
-                "average_block_time": self.average_block_time
+                "average_block_time": self._calculate_average_block_time()
             }
-            
+
             # Add metrics from each manager
             metrics.update(self.state_manager.get_metrics())
             metrics.update(self.transaction_manager.get_metrics())
             metrics.update(self.cross_shard_manager.get_metrics())
-            
+
             return metrics
 
         except Exception as e:
             logger.error(f"Failed to get metrics: {str(e)}")
             return {"error": str(e)}
+
+    def _calculate_average_block_time(self) -> float:
+        """Calculate average time between blocks."""
+        if len(self.chain) < 2:
+            return 0.0
+
+        total_time = sum(
+            (self.chain[i].timestamp - self.chain[i-1].timestamp).total_seconds()
+            for i in range(1, len(self.chain))
+        )
+        return total_time / (len(self.chain) - 1)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert shard state to dictionary format."""
@@ -301,17 +337,25 @@ class Shard:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Shard':
-        """Create shard from dictionary data."""
+        """
+        Create shard from dictionary data.
+
+        Args:
+            data: Dictionary containing shard data
+
+        Returns:
+            Shard: Reconstructed shard instance
+        """
         try:
             # Create instance with config
             config = ShardConfig.from_dict(data["config"])
             shard = cls(data["shard_id"], config)
-            
+
             # Restore chain
             shard.chain = [Block.from_dict(block) for block in data["chain"]]
             shard.height = data["height"]
             shard.known_validators = set(data["known_validators"])
-            
+
             # Restore managers
             shard.transaction_manager = TransactionManager.from_dict(
                 data["transaction_manager"],
@@ -328,9 +372,9 @@ class Shard:
                 shard.shard_id,
                 config
             )
-            
+
             return shard
-            
+
         except Exception as e:
             logger.error(f"Failed to create shard from dictionary: {str(e)}")
             raise

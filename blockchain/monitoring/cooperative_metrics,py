@@ -1,0 +1,198 @@
+"""
+blockchain/monitoring/cooperative_metrics.py
+
+Monitors and tracks cooperative behavior metrics within the ICN network.
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional, Set
+import logging
+import json
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class CooperativeMetric:
+    """Represents a single cooperative metric measurement."""
+    metric_type: str
+    value: float
+    timestamp: datetime = field(default_factory=datetime.now)
+    metadata: Dict = field(default_factory=dict)
+
+@dataclass
+class CooperativeScore:
+    """Tracks cooperative scoring for a participant."""
+    participant_id: str
+    total_score: float = 0.0
+    metric_history: List[CooperativeMetric] = field(default_factory=list)
+    last_update: datetime = field(default_factory=datetime.now)
+
+class CooperativeMetricsMonitor:
+    """
+    Monitors and tracks cooperative metrics across the network.
+    
+    Key responsibilities:
+    - Track cooperative behavior metrics
+    - Calculate cooperation scores
+    - Provide insights into network cooperation levels
+    - Monitor resource sharing patterns
+    """
+
+    def __init__(self):
+        self.participant_scores: Dict[str, CooperativeScore] = {}
+        self.network_metrics: Dict[str, List[float]] = {
+            "resource_sharing": [],
+            "validation_participation": [],
+            "governance_participation": [],
+            "cooperative_growth": []
+        }
+        self.monitoring_start = datetime.now()
+        
+    def record_metric(
+        self, 
+        participant_id: str,
+        metric_type: str,
+        value: float,
+        metadata: Optional[Dict] = None
+    ) -> None:
+        """Record a new cooperative metric."""
+        try:
+            # Create metric
+            metric = CooperativeMetric(
+                metric_type=metric_type,
+                value=value,
+                metadata=metadata or {}
+            )
+            
+            # Initialize participant score if needed
+            if participant_id not in self.participant_scores:
+                self.participant_scores[participant_id] = CooperativeScore(participant_id)
+            
+            # Update participant metrics
+            score = self.participant_scores[participant_id]
+            score.metric_history.append(metric)
+            score.last_update = datetime.now()
+            
+            # Update network metrics
+            if metric_type in self.network_metrics:
+                self.network_metrics[metric_type].append(value)
+            
+            # Recalculate scores
+            self._update_cooperative_score(participant_id)
+            
+            logger.info(f"Recorded {metric_type} metric for {participant_id}: {value}")
+            
+        except Exception as e:
+            logger.error(f"Error recording metric: {str(e)}")
+
+    def _update_cooperative_score(self, participant_id: str) -> None:
+        """Update the cooperative score for a participant."""
+        try:
+            score = self.participant_scores[participant_id]
+            metrics = score.metric_history[-100:]  # Consider last 100 metrics
+            
+            if not metrics:
+                return
+                
+            # Calculate weighted average of recent metrics
+            weights = {
+                "resource_sharing": 0.3,
+                "validation_participation": 0.3,
+                "governance_participation": 0.2,
+                "cooperative_growth": 0.2
+            }
+            
+            weighted_sum = 0
+            weight_count = 0
+            
+            for metric in metrics:
+                if metric.metric_type in weights:
+                    weight = weights[metric.metric_type]
+                    weighted_sum += metric.value * weight
+                    weight_count += weight
+            
+            if weight_count > 0:
+                score.total_score = weighted_sum / weight_count
+                
+        except Exception as e:
+            logger.error(f"Error updating cooperative score: {str(e)}")
+
+    def get_participant_score(self, participant_id: str) -> Optional[float]:
+        """Get the current cooperative score for a participant."""
+        score = self.participant_scores.get(participant_id)
+        return score.total_score if score else None
+
+    def get_network_metrics(self) -> Dict:
+        """Get overall network cooperation metrics."""
+        try:
+            return {
+                "average_scores": {
+                    metric_type: sum(values) / len(values) if values else 0
+                    for metric_type, values in self.network_metrics.items()
+                },
+                "participant_count": len(self.participant_scores),
+                "active_participants": sum(
+                    1 for score in self.participant_scores.values()
+                    if (datetime.now() - score.last_update).total_seconds() < 3600
+                ),
+                "monitoring_duration": (datetime.now() - self.monitoring_start).total_seconds(),
+                "total_metrics_recorded": sum(
+                    len(values) for values in self.network_metrics.values()
+                )
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting network metrics: {str(e)}")
+            return {}
+
+    def get_top_cooperators(self, limit: int = 10) -> List[Dict]:
+        """Get the top cooperating participants."""
+        try:
+            sorted_scores = sorted(
+                self.participant_scores.items(),
+                key=lambda x: x[1].total_score,
+                reverse=True
+            )
+            
+            return [
+                {
+                    "participant_id": participant_id,
+                    "score": score.total_score,
+                    "last_update": score.last_update.isoformat(),
+                    "metric_count": len(score.metric_history)
+                }
+                for participant_id, score in sorted_scores[:limit]
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error getting top cooperators: {str(e)}")
+            return []
+
+    def export_metrics(self) -> Dict:
+        """Export all metrics data for analysis."""
+        try:
+            return {
+                "participant_scores": {
+                    pid: {
+                        "total_score": score.total_score,
+                        "last_update": score.last_update.isoformat(),
+                        "metrics": [
+                            {
+                                "type": m.metric_type,
+                                "value": m.value,
+                                "timestamp": m.timestamp.isoformat(),
+                                "metadata": m.metadata
+                            }
+                            for m in score.metric_history
+                        ]
+                    }
+                    for pid, score in self.participant_scores.items()
+                },
+                "network_metrics": self.network_metrics,
+                "monitoring_start": self.monitoring_start.isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error exporting metrics: {str(e)}")
+            return {}

@@ -1,5 +1,7 @@
+# Location: blockchain/consensus/proof_of_cooperation/types.py
+
 """
-types.py
+consensus_types.py
 
 This module defines data structures and types used within the Proof of Cooperation (PoC) consensus mechanism.
 It includes configuration settings, validation results, metrics tracking, and the overall state of the consensus.
@@ -16,6 +18,9 @@ Classes:
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Any
 from datetime import datetime
+
+# The rest of the file remains unchanged, as provided earlier.
+
 
 @dataclass
 class ConsensusConfig:

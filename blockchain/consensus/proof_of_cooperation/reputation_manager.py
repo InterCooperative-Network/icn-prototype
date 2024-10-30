@@ -2,36 +2,36 @@
 reputation_manager.py
 
 This module manages reputation scoring and calculations for the Proof of Cooperation (PoC) consensus mechanism.
-It handles all aspects of node reputation, including score calculation, decay, validation eligibility, 
-and updates to validation statistics.
+It handles node reputation, score calculation, decay, validation eligibility, and updates to validation statistics.
 
 Classes:
     ReputationManager
 """
 
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
 import logging
 import math
-from .types import ConsensusConfig, ValidationResult, ValidationStats
-from ..core.node import Node
-from .collusion_detector import CollusionDetector
+from datetime import datetime, timedelta
+from typing import Dict, Optional, Any
+
+# Module imports
+from blockchain.core.node import Node
+from blockchain.consensus.proof_of_cooperation.types import ConsensusConfig, ValidationResult, ValidationStats
+from blockchain.consensus.collusion_detector import CollusionDetector
 
 logger = logging.getLogger(__name__)
 
 class ReputationManager:
     """
-    Manages reputation scoring and calculations for the consensus mechanism.
-    Handles all aspects of node reputation, including score calculation,
-    decay, dynamic adjustments, and validation eligibility.
+    Manages reputation scoring and calculations for the Proof of Cooperation consensus mechanism.
+    Handles node reputation, including score calculation, decay, adjustments, and validation eligibility.
     """
 
     def __init__(self, config: ConsensusConfig, collusion_detector: CollusionDetector):
         """
-        Initialize the reputation manager.
+        Initialize the ReputationManager.
 
         Args:
-            config (ConsensusConfig): The consensus configuration parameters.
+            config (ConsensusConfig): Configuration parameters for the consensus mechanism.
             collusion_detector (CollusionDetector): Instance of the collusion detector for integration.
         """
         self.config = config
@@ -43,11 +43,11 @@ class ReputationManager:
 
     def calculate_cooperation_score(self, node: Node, shard_id: Optional[int] = None) -> float:
         """
-        Calculate a node's cooperation score, considering various factors like diversity,
-        consistency, performance, shard-specific behavior, time decay, and collusion risk.
+        Calculate the cooperation score for a node, considering diversity, consistency, performance,
+        shard-specific behavior, time decay, and collusion risk.
 
         Args:
-            node (Node): The node to calculate the score for.
+            node (Node): The node for which the score is calculated.
             shard_id (Optional[int]): Optional shard ID for shard-specific scoring.
 
         Returns:
@@ -56,7 +56,7 @@ class ReputationManager:
         try:
             cache_key = f"{node.node_id}:{shard_id or 'all'}"
             
-            # Return cached score if it is still valid
+            # Check and return cached score if valid
             if cache_key in self.score_cache:
                 cache_time = self.last_score_update.get(cache_key)
                 if cache_time and datetime.now() - cache_time < self.cache_duration:
@@ -100,18 +100,17 @@ class ReputationManager:
 
     def _calculate_collusion_factor(self, node: Node) -> float:
         """
-        Calculate a collusion factor that reduces the score of nodes with high collusion risk.
+        Calculate a collusion factor to reduce the score of nodes with high collusion risk.
 
         Args:
-            node (Node): The node to calculate the collusion factor for.
+            node (Node): The node for which the collusion factor is calculated.
 
         Returns:
             float: The calculated collusion factor.
         """
         try:
-            risk_score = self.collusion_detector._calculate_risk_score(node)
+            risk_score = self.collusion_detector.calculate_risk_score(node)
             
-            # Reduce the factor based on collusion risk
             if risk_score > 0.9:
                 return 0.2
             elif risk_score > 0.7:
@@ -127,12 +126,11 @@ class ReputationManager:
 
     def _calculate_diversity_factor(self, node: Node) -> float:
         """
-        Calculate a diversity factor based on a node's cooperative interactions. 
-        It evaluates the variety of cooperatives the node interacts with, 
-        favoring nodes that engage with diverse cooperatives.
+        Calculate a diversity factor based on a node's interactions with cooperatives.
+        Rewards nodes with diverse cooperative engagement.
 
         Args:
-            node (Node): The node to calculate the diversity factor for.
+            node (Node): The node for which the diversity factor is calculated.
 
         Returns:
             float: The calculated diversity factor.
@@ -159,30 +157,28 @@ class ReputationManager:
 
     def _calculate_consistency_factor(self, node: Node) -> float:
         """
-        Calculate a consistency factor based on the node's validation history.
-        This factor rewards consistent performance over time.
+        Calculate a consistency factor based on the node's validation history,
+        rewarding consistent performance over time.
 
         Args:
-            node (Node): The node to calculate the consistency factor for.
+            node (Node): The node for which the consistency factor is calculated.
 
         Returns:
             float: The calculated consistency factor.
         """
         try:
-            if not node.validation_history:
-                return 1.0
-
             recent_validations = node.validation_history[-50:]
             successful = sum(
                 1 for v in recent_validations 
                 if v.get("evidence", {}).get("success", False)
             )
-            success_rate = successful / len(recent_validations)
+            success_rate = successful / len(recent_validations) if recent_validations else 1.0
 
-            if node.total_validations < 10:
-                min_rate = self.config.validation_thresholds["min_success_rate"] * 0.8
-            else:
-                min_rate = self.config.validation_thresholds["min_success_rate"]
+            min_rate = (
+                self.config.validation_thresholds["min_success_rate"] * 0.8
+                if node.total_validations < 10
+                else self.config.validation_thresholds["min_success_rate"]
+            )
 
             if success_rate > 0.95:
                 return 1.8
@@ -199,20 +195,17 @@ class ReputationManager:
 
     def _calculate_performance_factor(self, node: Node) -> float:
         """
-        Calculate a performance factor based on node metrics such as availability, 
+        Calculate a performance factor based on node metrics, including availability,
         validation success rate, and network reliability.
 
         Args:
-            node (Node): The node to calculate the performance factor for.
+            node (Node): The node for which the performance factor is calculated.
 
         Returns:
             float: The calculated performance factor.
         """
         try:
-            metrics = node.performance_metrics
-            if not metrics:
-                return 1.0
-
+            metrics = node.performance_metrics or {}
             weights = {
                 "availability": 0.35,
                 "validation_success_rate": 0.35,
@@ -243,7 +236,7 @@ class ReputationManager:
         Calculate a shard-specific factor that rewards experience and performance within a shard.
 
         Args:
-            node (Node): The node to calculate the shard factor for.
+            node (Node): The node for which the shard factor is calculated.
             shard_id (int): The shard ID to calculate the factor for.
 
         Returns:
@@ -281,7 +274,7 @@ class ReputationManager:
         Calculate a time-based decay factor that reduces the score of inactive nodes over time.
 
         Args:
-            node (Node): The node to calculate the time decay for.
+            node (Node): The node for which the time decay is calculated.
 
         Returns:
             float: The calculated time decay factor.
@@ -437,7 +430,7 @@ class ReputationManager:
     @classmethod
     def from_dict(cls, data: Dict[str, Any], config: ConsensusConfig, collusion_detector: CollusionDetector) -> 'ReputationManager':
         """
-        Create a reputation manager instance from a dictionary of data.
+        Create a ReputationManager instance from a dictionary of data.
 
         Args:
             data (Dict[str, Any]): The dictionary data to initialize from.

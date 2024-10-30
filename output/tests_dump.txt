@@ -10,6 +10,138 @@ The InterCooperative Network (ICN) is a decentralized cooperative management sys
 # Code Files for Module: tests
 
 
+# File: /home/matt/icn-prototype/tests/test_system_flow.py
+
+```py
+    # blockchain/tests/integration/test_system_flow.py
+    """
+    Integration tests for complete system flow, from transaction creation to finalization.
+    """
+    
+    import pytest
+    import asyncio
+    from blockchain.core.transaction import Transaction
+    from blockchain.consensus.system.block_production import BlockProductionScheduler
+    
+    async def test_complete_transaction_flow(test_env):
+        """Test complete flow of transaction through system."""
+        # Create test transaction
+        tx = Transaction(
+            sender=test_env.nodes[0].node_id,
+            receiver=test_env.nodes[1].node_id,
+            action="transfer",
+            data={"amount": 50.0}
+        )
+        
+        # Add transaction to blockchain
+        assert await test_env.blockchain.add_transaction(tx.to_dict())
+        
+        # Create block production scheduler
+        scheduler = BlockProductionScheduler(
+            test_env.consensus,
+            test_env.blockchain.state_manager
+        )
+        
+        # Create new block
+        block = await scheduler.create_block(test_env.nodes[0].node_id)
+        assert block is not None
+        
+        # Validate and add block
+        assert await test_env.blockchain.add_block(block)
+        
+        # Verify state update
+        receiver_balance = await test_env.blockchain.state_manager.get_balance(
+            test_env.nodes[1].node_id
+        )
+        assert receiver_balance == 50.0
+    
+    async def test_cross_shard_transaction(test_env):
+        """Test cross-shard transaction processing."""
+        # Create cross-shard transaction
+        tx = Transaction(
+            sender=test_env.nodes[0].node_id,
+            receiver=test_env.nodes[1].node_id,
+            action="transfer",
+            data={
+                "amount": 50.0,
+                "target_shard": 1
+            }
+        )
+        
+        # Process transaction
+        assert await test_env.blockchain.add_transaction(tx.to_dict())
+        
+        # Verify cross-shard handling
+        # ... To be implemented
+```
+
+# File: /home/matt/icn-prototype/tests/conftest.py
+
+```py
+    # blockchain/tests/conftest.py
+    """
+    Test configuration and fixtures for the ICN blockchain testing.
+    Provides common test setup and utilities.
+    """
+    
+    import pytest
+    import asyncio
+    from typing import List, Dict
+    from dataclasses import dataclass
+    from blockchain.core.blockchain import Blockchain
+    from blockchain.core.node import Node
+    from blockchain.consensus.proof_of_cooperation import ProofOfCooperation
+    from blockchain.network.config import NetworkConfig
+    
+    @dataclass
+    class TestEnvironment:
+        """Encapsulates test environment components."""
+        blockchain: Blockchain
+        nodes: List[Node]
+        consensus: ProofOfCooperation
+        network_configs: Dict[str, NetworkConfig]
+    
+    @pytest.fixture
+    async def test_env():
+        """Create complete test environment."""
+        # Create blockchain instance
+        blockchain = Blockchain(num_shards=3, initial_mana=1000)
+        
+        # Create test nodes
+        nodes = [Node(f"node_{i}", initial_stake=100.0) for i in range(5)]
+        
+        # Create network configs
+        network_configs = {}
+        for node in nodes:
+            config = NetworkConfig(
+                node_id=node.node_id,
+                host="127.0.0.1",
+                port=30303 + len(network_configs)
+            )
+            network_configs[node.node_id] = config
+            
+        # Create consensus mechanism
+        consensus = ProofOfCooperation(min_reputation=10.0)
+        
+        # Register nodes with blockchain
+        for node in nodes:
+            await blockchain.register_node(node)
+            
+        return TestEnvironment(
+            blockchain=blockchain,
+            nodes=nodes,
+            consensus=consensus,
+            network_configs=network_configs
+        )
+    
+    @pytest.fixture
+    def event_loop():
+        """Create event loop for async tests."""
+        loop = asyncio.get_event_loop_policy().new_event_loop()
+        yield loop
+        loop.close()
+```
+
 # File: /home/matt/icn-prototype/tests/__init__.py
 
 ```py
@@ -2577,6 +2709,127 @@ The InterCooperative Network (ICN) is a decentralized cooperative management sys
     
     if __name__ == '__main__':
         unittest.main(verbosity=2)
+```
+
+# File: /home/matt/icn-prototype/tests/performance/test_system_performance.py
+
+```py
+    # blockchain/tests/performance/test_system_performance.py
+    """
+    Performance testing framework for the ICN blockchain system.
+    Tests system performance under various load conditions.
+    """
+    
+    import pytest
+    import asyncio
+    from typing import List
+    import random
+    from datetime import datetime
+    
+    from blockchain.core.transaction import Transaction
+    from blockchain.system.monitoring import SystemMonitor
+    from blockchain.tests.conftest import TestEnvironment
+    
+    async def generate_test_transactions(
+        count: int,
+        test_env: TestEnvironment
+    ) -> List[Transaction]:
+        """Generate test transactions."""
+        transactions = []
+        nodes = test_env.nodes
+        
+        for _ in range(count):
+            sender = random.choice(nodes)
+            receiver = random.choice([n for n in nodes if n != sender])
+            
+            tx = Transaction(
+                sender=sender.node_id,
+                receiver=receiver.node_id,
+                action="transfer",
+                data={
+                    "amount": random.uniform(1, 100),
+                    "timestamp": datetime.now()
+                }
+            )
+            transactions.append(tx)
+            
+        return transactions
+    
+    async def test_transaction_throughput(test_env: TestEnvironment):
+        """Test system transaction processing throughput."""
+        # Setup monitoring
+        monitor = SystemMonitor()
+        await monitor.start_monitoring()
+        
+        try:
+            # Generate test transactions
+            tx_count = 1000
+            transactions = await generate_test_transactions(tx_count, test_env)
+            
+            # Record start time
+            start_time = datetime.now()
+            
+            # Process transactions
+            tasks = [
+                test_env.blockchain.add_transaction(tx.to_dict())
+                for tx in transactions
+            ]
+            results = await asyncio.gather(*tasks)
+            
+            # Calculate metrics
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            success_count = len([r for r in results if r])
+            
+            # Get monitoring metrics
+            metrics = monitor.get_system_status()
+            
+            assert success_count > 0
+            assert duration > 0
+            
+            throughput = success_count / duration
+            print(f"Transaction throughput: {throughput:.2f} tx/s")
+            print(f"Success rate: {(success_count/tx_count)*100:.2f}%")
+            
+        finally:
+            await monitor.stop_monitoring()
+    
+    async def test_network_capacity(test_env: TestEnvironment):
+        """Test network capacity and message handling."""
+        monitor = SystemMonitor()
+        await monitor.start_monitoring()
+        
+        try:
+            # Generate large number of messages
+            message_count = 5000
+            message_size = 1024  # 1KB per message
+            
+            # Send messages
+            start_time = datetime.now()
+            
+            tasks = []
+            for _ in range(message_count):
+                tasks.append(
+                    test_env.blockchain.network.broadcast_message(
+                        "test_message",
+                        {"data": "x" * message_size}
+                    )
+                )
+                
+            await asyncio.gather(*tasks)
+            
+            # Calculate metrics
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            
+            # Get monitoring metrics
+            metrics = monitor.get_system_status()
+            
+            bandwidth = (message_count * message_size) / duration / 1024  # KB/s
+            print(f"Network bandwidth: {bandwidth:.2f} KB/s")
+            
+        finally:
+            await monitor.stop_monitoring()
 ```
 
 # File: /home/matt/icn-prototype/tests/performance/test_load_handling.py
